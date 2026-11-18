@@ -1,0 +1,963 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fiber Splice Workspace</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090d12;
+      --panel: #0f1520;
+      --panel-2: #141c2b;
+      --panel-3: #1b2940;
+      --border: #22344d;
+      --border-bright: #38597b;
+      --accent: #a3e635;
+      --accent-2: #24b7ff;
+      --orange: #ff6a00;
+      --text: #ecfccb;
+      --text-dim: #71879a;
+      --muted: #496174;
+      --danger: #ff687e;
+      --shadow: 0 20px 60px rgba(0,0,0,.48);
+      font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--text); }
+    body { font-size: 13px; }
+    button, input, select, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:disabled { opacity: .35; cursor: not-allowed; }
+
+    .app { width: 100%; height: 100%; display: flex; flex-direction: column; }
+    .topbar { height: 78px; flex: 0 0 78px; display: flex; align-items: center; gap: 14px; padding: 0 16px; background: rgba(9,13,18,.96); border-bottom: 1px solid var(--border); z-index: 20; }
+    .brand { display: flex; align-items: flex-start; gap: 10px; min-width: 205px; }
+    .brand-copy { min-width: 0; }
+    .brand-mark { width: 31px; height: 31px; border: 2px solid var(--accent); border-radius: 9px; position: relative; box-shadow: 0 0 18px rgba(163,230,53,.12); }
+    .brand-mark::before { content: ""; position: absolute; left: 6px; top: 7px; width: 16px; height: 2px; background: var(--accent-2); box-shadow: 0 6px 0 var(--accent-2), 0 12px 0 var(--accent-2); }
+    .brand-title { margin: 0; color: #f2f9e6; font-size: 14px; letter-spacing: .08em; text-transform: uppercase; }
+    .brand-subtitle { color: var(--text-dim); font-size: 10px; margin-top: 2px; }
+    .brand-credit, .brand-support { white-space: nowrap; font-size: 12px; line-height: 1.2; font-weight: 700; margin-top: 4px; }
+    .brand-credit { color: #b9b9b9; }
+    .brand-credit a { color: #e0e0e0; text-decoration: underline; }
+    .brand-support { color: var(--accent); font-size: 11px; margin-top: 3px; }
+    .brand-support a { color: var(--accent); text-decoration: underline; }
+    .project-name { width: 210px; height: 33px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; outline: none; background: rgba(255,255,255,.035); color: #fff; font-family: ui-monospace, monospace; font-size: 12px; }
+    .project-name:focus { border-color: var(--accent); }
+    .top-actions { display: flex; align-items: center; gap: 6px; }
+    .spacer { flex: 1; }
+    .button, .icon-button { min-height: 31px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; color: #dcebd2; background: var(--panel-2); transition: .15s ease; }
+    .button:hover, .icon-button:hover { border-color: var(--border-bright); background: var(--panel-3); }
+    .button.primary { color: #071006; background: var(--accent); border-color: var(--accent); font-weight: 700; }
+    .button.primary:hover { filter: brightness(1.08); }
+    .button.orange { color: #fff; background: rgba(255,106,0,.15); border-color: rgba(255,106,0,.45); }
+    .button.danger { color: #ffc0c8; border-color: rgba(255,104,126,.42); }
+    .icon-button { width: 32px; padding: 0; font-size: 17px; }
+    .icon-button:disabled { opacity: .38; cursor: not-allowed; border-color: var(--border); background: var(--panel-2); }
+    .zoom { display: flex; align-items: center; gap: 4px; color: var(--text-dim); font-size: 11px; }
+    .zoom-readout { min-width: 46px; text-align: center; color: #d8e8d1; }
+    .save-state { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+
+    .workspace { display: flex; flex: 1; min-height: 0; }
+    .toolbar { width: 70px; flex: 0 0 70px; padding: 11px 9px; display: flex; flex-direction: column; gap: 8px; background: #0c121a; border-right: 1px solid var(--border); z-index: 10; }
+    .tool { width: 52px; min-height: 48px; padding: 5px 2px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: #6c8296; font-size: 9px; text-transform: uppercase; letter-spacing: .04em; }
+    .tool strong { display: block; font-size: 19px; line-height: 20px; color: #b6c8d5; font-weight: 400; }
+    .tool:hover { color: #fff; background: rgba(255,255,255,.05); border-color: var(--border); }
+    .tool.active { color: var(--accent); background: rgba(163,230,53,.1); border-color: rgba(163,230,53,.55); box-shadow: 0 0 16px rgba(163,230,53,.12); }
+    .tool.active strong { color: var(--accent); }
+    .tool-divider { height: 1px; background: var(--border); margin: 3px 0; }
+
+    .canvas-wrap { flex: 1; min-width: 0; min-height: 0; position: relative; overflow: hidden; background-color: #2b3035; background-image: linear-gradient(rgba(255,255,255,.065) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.065) 1px, transparent 1px), linear-gradient(rgba(0,0,0,.045) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.045) 1px, transparent 1px); background-size: 80px 80px, 80px 80px, 20px 20px, 20px 20px; }
+    .canvas-wrap::after { content: ""; pointer-events: none; position: absolute; inset: 0; background: radial-gradient(circle at 50% 38%, transparent 0, rgba(0,0,0,.02) 57%, rgba(0,0,0,.2) 100%); }
+    #svgCanvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    .canvas-help { position: absolute; left: 17px; bottom: 14px; color: #607789; font: 10px ui-monospace, monospace; pointer-events: none; }
+    .canvas-help b { color: #98b5c7; }
+    .canvas-mode { position: absolute; top: 14px; left: 17px; padding: 6px 9px; color: var(--accent); border: 1px solid rgba(163,230,53,.25); border-radius: 6px; background: rgba(7,12,17,.72); font: 10px ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; pointer-events: none; }
+
+    .inspector { width: 310px; flex: 0 0 310px; padding: 16px 15px 28px; overflow: auto; background: var(--panel); border-left: 1px solid var(--border); z-index: 10; }
+    .inspector h2 { margin: 0 0 4px; color: #f1f8e9; font-size: 15px; letter-spacing: .05em; text-transform: uppercase; }
+    .inspector .sub { margin: 0 0 17px; color: var(--text-dim); font-size: 11px; line-height: 1.45; }
+    .section { margin-top: 17px; padding-top: 15px; border-top: 1px solid var(--border); }
+    .section h3 { margin: 0 0 10px; color: #8ba7ba; font-size: 10px; letter-spacing: .15em; text-transform: uppercase; }
+    .field { margin-bottom: 11px; }
+    .field label { display: block; margin-bottom: 5px; color: #728a9c; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+    .field input, .field select, .field textarea { width: 100%; min-height: 33px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; outline: none; background: #0a1119; color: #e9f6ed; font-size: 12px; }
+    .field textarea { resize: vertical; min-height: 65px; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(163,230,53,.09); }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .button-row { display: flex; flex-wrap: wrap; gap: 7px; }
+    .button-row .button { flex: 1; min-width: 95px; }
+    .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .meta-card { padding: 9px; background: rgba(255,255,255,.025); border: 1px solid rgba(113,160,192,.14); border-radius: 7px; }
+    .meta-card .k { color: #667e91; font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+    .meta-card .v { margin-top: 3px; color: #dcebd2; font: 12px ui-monospace, monospace; overflow-wrap: anywhere; }
+    .notice { padding: 10px; border: 1px solid rgba(163,230,53,.22); border-radius: 7px; color: #aec69f; background: rgba(163,230,53,.06); font-size: 11px; line-height: 1.5; }
+    .project-list { display: flex; flex-direction: column; gap: 6px; }
+    .project-list-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,.025); }
+    .project-list-item button { border: 0; background: transparent; color: #dcebd2; text-align: left; padding: 0; flex: 1; }
+    .project-list-item small { color: #668095; white-space: nowrap; }
+    .port-label-list { max-height: 260px; overflow: auto; display: flex; flex-direction: column; gap: 5px; }
+    .port-label-row { display: grid; grid-template-columns: 29px 1fr; align-items: center; gap: 6px; }
+    .port-label-row span { color: #6f8798; font: 10px ui-monospace, monospace; text-align: right; }
+
+    .node-card { fill: rgba(36,183,255,.16); stroke: #24b7ff; stroke-width: 2; filter: drop-shadow(0 9px 18px rgba(0,0,0,.48)); }
+    .node-card.selected { stroke: var(--accent); }
+    .node-title { fill: #f2f6fa; font-size: 12px; font-weight: 700; letter-spacing: .03em; }
+    .node-subtitle { fill: #8198a9; font-size: 8px; letter-spacing: .1em; }
+    .node-port { fill: #0a1119; stroke: #8097a7; stroke-width: 1.5; }
+    .node-port.selected { stroke: var(--accent); stroke-width: 2.5; filter: drop-shadow(0 0 5px rgba(163,230,53,.8)); }
+    .node-port:hover, .node-port.hot { stroke: var(--accent-2); stroke-width: 2.5; filter: drop-shadow(0 0 5px rgba(36,183,255,.8)); }
+    .port-label { fill: #8ea8b9; font-size: 8px; font-family: ui-monospace, monospace; pointer-events: none; }
+    .cable-trunk { fill: url(#trunkGradient); stroke: #f7d54a; stroke-width: 3.5; filter: drop-shadow(0 0 4px rgba(247,213,74,.95)) drop-shadow(0 0 11px rgba(247,213,74,.6)); }
+    .cable-trunk.selected { stroke: var(--accent); filter: drop-shadow(0 0 5px rgba(163,230,53,1)) drop-shadow(0 0 14px rgba(163,230,53,.75)); }
+    .trunk-title { fill: #c3d5dd; font-size: 9px; letter-spacing: .16em; text-anchor: middle; }
+    .trunk-location { fill: var(--accent); font-size: 16px; letter-spacing: .18em; text-anchor: middle; }
+    .trunk-name { fill: #fff; font-size: 18px; font-weight: 700; text-anchor: middle; }
+    .trunk-cable-display { fill: #e8f6ff; font-size: 16px; font-weight: 700; text-anchor: middle; }
+    .trunk-meta { fill: #748897; font-size: 18px; font-weight: 700; letter-spacing: .08em; text-anchor: middle; }
+    .trunk-end-box { fill: rgba(8,16,24,.94); stroke: rgba(36,183,255,.62); stroke-width: 1.2; rx: 4; }
+    .trunk-end-caption { fill: #6f8da1; font-size: 7px; font-weight: 700; letter-spacing: .16em; text-anchor: middle; }
+    .trunk-end-value { fill: #e8f6ff; font-size: 9px; font-weight: 700; text-anchor: middle; }
+    .trunk-end-label-group { cursor: move; }
+    .trunk-lines { fill: url(#trunkLines); opacity: .55; pointer-events: none; }
+    .tube-label { fill: #b5cbd5; font-size: 8px; font-family: ui-monospace, monospace; }
+    .tube-label.expanded { fill: var(--accent-2); font-weight: 700; }
+    .tube-pill { stroke: rgba(255,255,255,.38); stroke-width: 1; }
+    .tube-row-hit { fill: transparent; cursor: pointer; }
+    .strand-label { fill: rgba(215,237,245,.88); font-size: 7px; font-family: ui-monospace, monospace; pointer-events: none; }
+    .strand-dot { stroke: rgba(255,255,255,.4); stroke-width: 1; cursor: crosshair; }
+    .strand-dot.selected { stroke: var(--accent); stroke-width: 2.4; filter: drop-shadow(0 0 7px rgba(163,230,53,.78)); }
+    .strand-dot.hot { stroke: var(--accent-2); stroke-width: 2.5; filter: drop-shadow(0 0 8px rgba(36,183,255,.9)); }
+    .fan-line { fill: none; stroke-width: 1.25; stroke-opacity: .62; }
+    .connection-line { fill: none; stroke: #84a2b5; stroke-width: 1.5; stroke-opacity: .72; pointer-events: stroke; cursor: pointer; }
+    .connection-line.patch { stroke: var(--orange); stroke-dasharray: 8 4; stroke-opacity: .9; }
+    .connection-line.selected { stroke: var(--accent); stroke-width: 2.5; stroke-opacity: 1; filter: drop-shadow(0 0 5px rgba(163,230,53,.7)); }
+    .connection-hit { fill: none; stroke: transparent; stroke-width: 13; pointer-events: stroke; cursor: pointer; }
+    .canvas-project-title { position: absolute; top: 13px; left: 50%; z-index: 4; transform: translateX(-50%); max-width: min(70%, 620px); overflow: hidden; color: #e8f6ff; font-size: 14px; font-weight: 700; letter-spacing: .08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; pointer-events: none; text-shadow: 0 2px 8px rgba(0,0,0,.7); }
+    .preview-line { fill: none; stroke: var(--accent-2); stroke-width: 2; stroke-dasharray: 7 5; pointer-events: none; }
+    .selection-box { fill: rgba(36,183,255,.12); stroke: #24b7ff; stroke-width: 1.5; stroke-dasharray: 6 4; pointer-events: none; }
+    .workzone { fill: rgba(74, 109, 140, .09); stroke: rgba(102, 149, 182, .42); stroke-width: 1.5; stroke-dasharray: 7 5; cursor: move; }
+    .workzone.selected { stroke: var(--accent); }
+    .workzone-resize-handle { fill: rgba(163,230,53,.65); stroke: #0b1117; stroke-width: 1; cursor: nwse-resize; }
+    .equipment-resize-handle { fill: rgba(36,183,255,.7); stroke: #0b1117; stroke-width: 1; cursor: nwse-resize; }
+    .workzone-title { fill: #9ab3c1; font-size: 12px; font-weight: 700; pointer-events: none; }
+    .workzone-description { fill: #617b8c; font-size: 9px; pointer-events: none; }
+    .legend-card { fill: rgba(11,31,47,.96); stroke: rgba(36,183,255,.8); stroke-width: 2; filter: drop-shadow(0 8px 16px rgba(0,0,0,.4)); }
+    .legend-card.selected { stroke: var(--accent); }
+    .legend-header { fill: rgba(36,183,255,.18); pointer-events: none; }
+    .legend-title { fill: #e8f6ff; font-size: 12px; font-weight: 700; letter-spacing: .08em; pointer-events: none; }
+    .legend-row-label { fill: #c7dce7; font-size: 9px; font-family: ui-monospace, monospace; pointer-events: none; }
+    .legend-swatch { stroke: rgba(255,255,255,.55); stroke-width: 1; pointer-events: none; }
+    .legend-resize-handle { fill: #24b7ff; stroke: #07121b; stroke-width: 1; cursor: nwse-resize; }
+    .empty-title { fill: #7891a1; text-anchor: middle; font-size: 16px; }
+    .empty-subtitle { fill: #4c6576; text-anchor: middle; font-size: 11px; }
+
+    .modal-overlay { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; padding: 25px; background: rgba(0,0,0,.65); z-index: 100; }
+    .modal-overlay.open { display: flex; }
+    .modal { width: min(610px, 100%); max-height: 82vh; display: flex; flex-direction: column; overflow: hidden; background: #101923; border: 1px solid var(--border-bright); border-radius: 12px; box-shadow: var(--shadow); }
+    .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 16px 18px; border-bottom: 1px solid var(--border); }
+    .modal-head h2 { margin: 0; color: #fff; font-size: 15px; }
+    .modal-head p { margin: 4px 0 0; color: var(--text-dim); font-size: 11px; }
+    .modal-body { padding: 15px 18px 20px; overflow: auto; }
+    .modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border); }
+    .toast { position: fixed; left: 50%; bottom: 20px; z-index: 150; transform: translate(-50%, 15px); opacity: 0; pointer-events: none; padding: 10px 14px; border: 1px solid var(--border-bright); border-radius: 7px; background: #101d29; color: #eaf5eb; box-shadow: var(--shadow); font-size: 12px; transition: .2s ease; }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
+    .toast.error { color: #ffc2cb; border-color: rgba(255,104,126,.55); }
+    @media (max-width: 1000px) { .inspector { width: 280px; flex-basis: 280px; } .project-name { width: 160px; } .brand { min-width: 175px; } }
+    @media (max-width: 760px) { .inspector { position: absolute; top: 78px; right: 0; bottom: 0; transform: translateX(100%); transition: transform .2s ease; } .inspector.open { transform: translateX(0); } .toolbar { width: 58px; flex-basis: 58px; padding-left: 3px; padding-right: 3px; } .tool { width: 50px; } .brand-credit, .brand-support, .brand-subtitle, .save-state { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark" aria-hidden="true"></div><div class="brand-copy"><div class="brand-title">Fiber Splice Workspace</div><div class="brand-credit">Created By: <a href="https://www.linkedin.com/in/georgegodby/" target="_blank" rel="noopener noreferrer">Joe Godby - linkedin.com/in/georgegodby/</a></div><div class="brand-support"><a href="https://buymeacoffee.com/broadbandengineering" target="_blank" rel="noopener noreferrer">Please Help Support: https://buymeacoffee.com/broadbandengineering</a></div></div></div>
+      <input class="project-name" id="projectName" aria-label="Project name" value="Untitled Project" />
+      <div class="top-actions"><button class="button" id="newProjectBtn">New</button><button class="button" id="projectsBtn">Projects</button><button class="button primary" id="exportBtn">Export DXF</button><button class="button" id="jpegBtn">Export JPEG</button></div>
+      <div class="spacer"></div>
+      <div class="zoom"><button class="icon-button" id="zoomOutBtn">−</button><span class="zoom-readout" id="zoomReadout">100%</span><button class="icon-button" id="zoomInBtn">+</button><button class="button" id="fitBtn">Fit</button></div>
+      <span class="save-state" id="saveState">Local save ready</span>
+    </header>
+
+    <div class="workspace">
+      <aside class="toolbar" aria-label="Workspace tools">
+        <button class="tool active" data-tool="select" title="Select and move"><strong>↖</strong>Select</button>
+        <button class="tool" data-tool="cable" title="Place a fiber cable"><strong>▣</strong>Cable</button>
+        <button class="tool" data-tool="endpoint" title="Place an end point"><strong>EP</strong>End Point</button>
+        <button class="tool" data-tool="workzone" title="Place a work zone"><strong>□</strong>Zone</button>
+        <button class="tool" data-tool="legend" title="Place a diagram legend"><strong>LG</strong>Legend</button>
+        <button class="tool" data-tool="equipment" title="Place equipment"><strong>EQ</strong>Equipment</button>
+        <button class="tool" data-tool="patch" title="Connect equipment to an expanded fiber strand"><strong>PC</strong>Patch Cable</button>
+        <div class="tool-divider"></div>
+        <button class="tool" id="undoBtn" title="Undo last change" aria-label="Undo last change" disabled><strong>&#8630;</strong>Undo</button>
+        <button class="tool" id="deleteBtn" title="Delete selected item"><strong>⌫</strong>Delete</button>
+        <button class="tool" id="centerBtn" title="Fit diagram to canvas"><strong>◎</strong>Center</button>
+      </aside>
+
+      <main class="canvas-wrap" id="canvasWrap">
+        <div class="canvas-mode" id="canvasMode">SELECT MODE</div>
+        <div class="canvas-project-title" id="canvasProjectTitle"></div>
+        <svg id="svgCanvas" role="application" aria-label="Fiber splice diagram canvas">
+          <defs>
+            <linearGradient id="trunkGradient" x1="0" x2="1"><stop offset="0" stop-color="#1e2329"/><stop offset=".48" stop-color="#050608"/><stop offset="1" stop-color="#15191e"/></linearGradient>
+            <pattern id="trunkLines" width="8" height="8" patternUnits="userSpaceOnUse"><path d="M 0 0 L 0 8" stroke="#fff" stroke-opacity=".1" stroke-width="1" /></pattern>
+          </defs>
+          <g id="world">
+            <rect id="worldRect" x="-100000" y="-100000" width="200000" height="200000" fill="transparent"></rect>
+            <g id="workzoneLayer"></g>
+            <g id="connectionLayer"></g>
+            <g id="itemLayer"></g>
+            <g id="legendLayer"></g>
+            <g id="previewLayer"></g>
+            <g id="emptyLayer"><text class="empty-title" x="0" y="-12">Build a fiber splice workspace</text><text class="empty-subtitle" x="0" y="14">Place a cable, End Point, or Equipment, then use Patch Cable for equipment-to-fiber links</text></g>
+          </g>
+        </svg>
+        <div class="canvas-help"><b>Pan:</b> middle/right drag or Shift+drag · <b>Zoom:</b> wheel · <b>Splice:</b> drag dot to dot · <b>Box:</b> drag empty canvas around connectors</div>
+      </main>
+
+      <aside class="inspector" id="inspector"><div id="inspectorContent"></div></aside>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="projectsModal">
+    <div class="modal">
+      <div class="modal-head"><div><h2>Local projects</h2><p>Projects are stored in this browser only. No login or cloud service is used.</p></div><button class="icon-button" id="closeProjectsBtn">×</button></div>
+      <div class="modal-body"><div class="project-list" id="projectList"></div></div>
+      <div class="modal-foot"><button class="button" id="closeProjectsBtn2">Close</button><button class="button primary" id="newProjectFromModal">New project</button></div>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    (() => {
+      'use strict';
+
+      const STORAGE_INDEX = 'fiber_splice_workspace_projects_v1';
+      const STORAGE_CURRENT = 'fiber_splice_workspace_current_v1';
+      const COLORS = [
+        { name: 'Blue', abb: 'BL', hex: '#1a73e8', text: '#fff' },
+        { name: 'Orange', abb: 'OR', hex: '#f57c00', text: '#111' },
+        { name: 'Green', abb: 'GR', hex: '#2e7d32', text: '#fff' },
+        { name: 'Brown', abb: 'BR', hex: '#8d6e63', text: '#fff' },
+        { name: 'Slate', abb: 'SL', hex: '#78909c', text: '#fff' },
+        { name: 'White', abb: 'WH', hex: '#e0e0e0', text: '#17212b' },
+        { name: 'Red', abb: 'RD', hex: '#e53935', text: '#fff' },
+        { name: 'Black', abb: 'BK', hex: '#616161', text: '#fff' },
+        { name: 'Yellow', abb: 'YL', hex: '#fdd835', text: '#17212b' },
+        { name: 'Violet', abb: 'VI', hex: '#8e24aa', text: '#fff' },
+        { name: 'Rose', abb: 'RS', hex: '#f48fb1', text: '#17212b' },
+        { name: 'Aqua', abb: 'AQ', hex: '#00acc1', text: '#17212b' }
+      ];
+      const BINDERS = [
+        { suffix: '', hex: null },
+        { suffix: '+BK', hex: '#111' },
+        { suffix: '+RD', hex: '#e53935' },
+        { suffix: '+OR', hex: '#f57c00' },
+        { suffix: '+GR', hex: '#2e7d32' }
+      ];
+      const LEGEND_ITEMS = [
+        { key: 'patch', label: 'Patch cable' },
+        { key: 'fiber', label: 'Fiber strands' },
+        { key: 'equipment', label: 'Equipment / End Point' },
+        { key: 'cable', label: 'Cable trunk' }
+      ];
+      const PRESETS = [12, 24, 36, 48, 72, 96, 144, 288, 432];
+      const L = { TUBE_H: 22, TUBE_PAD: 11, PILL_W: 27, PILL_H: 14, PILL_RX: 6, FAN_GAP: 42, STRAND_R: 5.2, STRAND_STEP: 24, STRAND_PAD: 12, BO_TUBE: 142, BO_EXPANDED: 270, TRUNK: 190 };
+
+      const $ = (s) => document.querySelector(s);
+      const svg = $('#svgCanvas');
+      const canvas = $('#canvasWrap');
+      const world = $('#world');
+      const toastEl = $('#toast');
+
+      let currentProjectId = null;
+      let state = blankState('Untitled Project');
+      let selected = null;
+      let selectedDots = [];
+      let tool = 'select';
+      let drag = null;
+      let panDrag = null;
+      let resize = null;
+      let labelDrag = null;
+      let strandDrag = null;
+      let boxSelect = null;
+      let hoverDot = null;
+      let toastTimer = null;
+      const undoStack = [];
+      let historySuspended = false;
+      const MAGNET_RADIUS_PX = 42;
+
+      function blankState(name) { return { version: 4, projectName: name, viewport: { x: 0, y: 0, zoom: 1 }, cables: [], equipment: [], connections: [], workZones: [], legends: [] }; }
+      function id(prefix) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
+      function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]); }
+      function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
+      function num(value, fallback = 0) { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
+      function cableById(idValue) { return state.cables.find((c) => c.id === idValue); }
+      function equipmentById(idValue) { return state.equipment.find((e) => e.id === idValue); }
+      function workzoneById(idValue) { return state.workZones.find((z) => z.id === idValue); }
+      function legendById(idValue) { return state.legends.find((legend) => legend.id === idValue); }
+      function cableTubes(cable) { return Math.ceil(Math.max(1, Number(cable.fiberCount) || 12) / 12); }
+      function tubeInfo(cable, tubeIdx) {
+        const group = Math.floor(tubeIdx / 12);
+        const base = COLORS[tubeIdx % 12];
+        const binder = BINDERS[group % BINDERS.length];
+        const firstFiber = tubeIdx * 12 + 1;
+        const count = Math.min(12, Math.max(0, cable.fiberCount - tubeIdx * 12));
+        return { group, base, binder, firstFiber, count, label: `${base.abb}${binder.suffix} (${String(tubeIdx + 1).padStart(2, '0')})` };
+      }
+      function strandInfo(cable, tubeIdx, strandIdx) {
+        const fiberNumber = tubeIdx * 12 + strandIdx + 1;
+        const color = COLORS[strandIdx % 12];
+        const group = Math.floor(tubeIdx / 12);
+        const binder = BINDERS[group % BINDERS.length];
+        return { fiberNumber, color, label: `${color.abb}${binder.suffix ? binder.suffix.replace('+', '-') : ''} (${fiberNumber})` };
+      }
+      function connectorColor(ref) { if (ref?.cableId) { const cable = cableById(ref.cableId); return cable ? strandInfo(cable, ref.tubeIdx, ref.strandIdx).color.hex : '#84a2b5'; } if (ref?.equipmentId) return COLORS[(Number(ref.strandIdx) || 0) % COLORS.length].hex; return '#84a2b5'; }
+      function cableUsedTubes(cableId) {
+        const used = new Set();
+        state.connections.forEach((connection) => [connection.from, connection.to].forEach((ref) => { if (ref.cableId === cableId) used.add(ref.tubeIdx); }));
+        return used;
+      }
+      function visibleTubes(cable) {
+        if (!cable.isCollapsed) return Array.from({ length: cableTubes(cable) }, (_, i) => i);
+        const used = cableUsedTubes(cable.id);
+        return Array.from({ length: cableTubes(cable) }, (_, i) => i).filter((i) => used.has(i));
+      }
+      function sideExpanded(cable, side) { return side === 'left' ? (cable.leftExp || []) : (cable.rightExp || []); }
+      function sideWidth(cable, side) { return sideExpanded(cable, side).length ? L.BO_EXPANDED : L.BO_TUBE; }
+      function expandHeight(cable, tubeIdx) { return sideExpanded(cable, 'left').includes(tubeIdx) || sideExpanded(cable, 'right').includes(tubeIdx) ? L.STRAND_PAD * 2 + cableTubeStrandCount(cable, tubeIdx) * L.STRAND_STEP : 0; }
+      function cableTubeStrandCount(cable, tubeIdx) { return tubeInfo(cable, tubeIdx).count; }
+      function sideHeight(cable, side) { return L.TUBE_PAD * 2 + visibleTubes(cable).reduce((sum, tubeIdx) => sum + L.TUBE_H + (sideExpanded(cable, side).includes(tubeIdx) ? L.STRAND_PAD * 2 + cableTubeStrandCount(cable, tubeIdx) * L.STRAND_STEP : 0), 0); }
+      function cableSize(cable) { return { leftW: sideWidth(cable, 'left'), rightW: sideWidth(cable, 'right'), height: Math.max(180, sideHeight(cable, 'left'), sideHeight(cable, 'right')), width: sideWidth(cable, 'left') + L.TRUNK + sideWidth(cable, 'right') }; }
+
+      function worldToScreen(point) {
+        const r = canvas.getBoundingClientRect();
+        return { x: r.left + r.width / 2 + state.viewport.x + point.x * state.viewport.zoom, y: r.top + r.height / 2 + state.viewport.y + point.y * state.viewport.zoom };
+      }
+      function screenToWorld(clientX, clientY) {
+        const r = canvas.getBoundingClientRect();
+        return { x: (clientX - r.left - r.width / 2 - state.viewport.x) / state.viewport.zoom, y: (clientY - r.top - r.height / 2 - state.viewport.y) / state.viewport.zoom };
+      }
+      function getCableDot(cable, ref) {
+        const size = cableSize(cable);
+        const side = ref.side;
+        const sideX = side === 'left' ? 0 : size.leftW + L.TRUNK;
+        const sideW = side === 'left' ? size.leftW : size.rightW;
+        const pillX = side === 'left' ? sideX + sideW - L.PILL_W - 2 : sideX + 2;
+        const dotX = side === 'left' ? pillX - L.FAN_GAP : pillX + L.PILL_W + L.FAN_GAP;
+        let y = L.TUBE_PAD;
+        for (const tubeIdx of visibleTubes(cable)) {
+          if (tubeIdx === ref.tubeIdx) {
+            if (!sideExpanded(cable, side).includes(tubeIdx)) return null;
+            return { x: cable.x + dotX, y: cable.y + y + L.TUBE_H + L.STRAND_PAD + ref.strandIdx * L.STRAND_STEP + L.STRAND_STEP / 2 };
+          }
+          y += L.TUBE_H;
+          if (sideExpanded(cable, side).includes(tubeIdx)) y += L.STRAND_PAD * 2 + cableTubeStrandCount(cable, tubeIdx) * L.STRAND_STEP;
+        }
+        return null;
+      }
+      function equipmentMinHeight(equipment) { return 54 + equipment.ports * 26 + 16; }
+      function equipmentTotalPorts(equipment) { return equipment.ports * (equipment.side === 'both' ? 2 : 1); }
+      function equipmentSize(equipment) { return { width: clamp(num(equipment.width, 230), 160, 2000), height: Math.max(equipmentMinHeight(equipment), clamp(num(equipment.height, equipmentMinHeight(equipment)), 60, 3000)) }; }
+      function getEquipmentDot(equipment, ref) {
+        const width = equipmentSize(equipment).width;
+        const y = equipment.y + 54 + ref.strandIdx * 26 + 13;
+        return { x: equipment.x + (ref.side === 'left' ? -13 : width + 13), y };
+      }
+      function getDotWorld(ref) { if (ref.cableId) { const cable = cableById(ref.cableId); return cable ? getCableDot(cable, ref) : null; } if (ref.equipmentId) { const equipment = equipmentById(ref.equipmentId); return equipment ? getEquipmentDot(equipment, ref) : null; } return null; }
+      function dotKey(ref) { return ref.cableId ? `c:${ref.cableId}:${ref.side}:${ref.tubeIdx}:${ref.strandIdx}` : `e:${ref.equipmentId}:${ref.side || 'right'}:${ref.strandIdx}`; }
+      function refsEqual(a, b) { return !!a && !!b && dotKey(a) === dotKey(b); }
+      function dotIsSelected(ref) { return selectedDots.some((item) => refsEqual(item, ref)); }
+      function clearDotSelection() { selectedDots = []; }
+      function setDotSelection(ref, additive = false) {
+        if (additive) {
+          const index = selectedDots.findIndex((item) => refsEqual(item, ref));
+          if (index >= 0) selectedDots.splice(index, 1);
+          else selectedDots.push({ ...ref });
+        } else selectedDots = [{ ...ref }];
+        if (!selectedDots.length) { selected = null; render(); return; }
+        const current = selectedDots[selectedDots.length - 1];
+        selected = { type: 'dot', id: dotKey(current), ref: current };
+        render();
+        if (window.innerWidth <= 760) $('#inspector').classList.add('open');
+      }
+      function dotAlreadyConnected(ref) { return state.connections.some((c) => refsEqual(c.from, ref) || refsEqual(c.to, ref)); }
+
+      function visibleDotRefs() {
+        const refs = [];
+        state.cables.forEach((cable) => {
+          ['left', 'right'].forEach((side) => {
+            const expanded = sideExpanded(cable, side);
+            expanded.forEach((tubeIdx) => {
+              if (!visibleTubes(cable).includes(tubeIdx)) return;
+              const count = cableTubeStrandCount(cable, tubeIdx);
+              for (let strandIdx = 0; strandIdx < count; strandIdx += 1) refs.push({ cableId: cable.id, side, tubeIdx, strandIdx });
+            });
+          });
+        });
+        state.equipment.forEach((equipment) => {
+          const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right'];
+          sides.forEach((side) => { for (let strandIdx = 0; strandIdx < equipment.ports; strandIdx += 1) refs.push({ equipmentId: equipment.id, side, tubeIdx: 0, strandIdx }); });
+        });
+        return refs;
+      }
+
+      function findMagneticTarget(point, source) {
+        let nearest = null;
+        let nearestDistance = Infinity;
+        const radiusWorld = (tool === 'patch' ? MAGNET_RADIUS_PX * 1.35 : MAGNET_RADIUS_PX) / state.viewport.zoom;
+        visibleDotRefs().forEach((candidate) => {
+          if (refsEqual(candidate, source) || dotAlreadyConnected(candidate)) return;
+          if (tool === 'patch' && ((source.equipmentId && !candidate.cableId) || (source.cableId && !candidate.equipmentId))) return;
+          const candidatePoint = getDotWorld(candidate);
+          if (!candidatePoint) return;
+          const distance = Math.hypot(candidatePoint.x - point.x, candidatePoint.y - point.y);
+          if (distance <= radiusWorld && distance < nearestDistance) {
+            nearest = candidate;
+            nearestDistance = distance;
+          }
+        });
+        return nearest;
+      }
+      function sameDotSet(a, b) {
+        if (!a || !b) return false;
+        if (a.cableId && b.cableId) return a.cableId === b.cableId && a.side === b.side;
+        if (a.equipmentId && b.equipmentId) return a.equipmentId === b.equipmentId && a.side === b.side;
+        return false;
+      }
+      function validConnectionPair(source, target) {
+        return tool !== 'patch' || ((source.equipmentId && target.cableId) || (source.cableId && target.equipmentId));
+      }
+      function findGroupMagneticTargets(point, sources, draggedSource) {
+        const anchorTarget = findMagneticTarget(point, draggedSource);
+        if (!anchorTarget) return null;
+        if (sources.length === 1) return [anchorTarget];
+        const sourcePoint = getDotWorld(draggedSource); const targetPoint = getDotWorld(anchorTarget);
+        if (!sourcePoint || !targetPoint) return null;
+        const candidates = visibleDotRefs().filter((candidate) => sameDotSet(candidate, anchorTarget) && !dotAlreadyConnected(candidate) && !sources.some((source) => refsEqual(source, candidate)));
+        const used = new Set(); const targets = [];
+        const radiusWorld = MAGNET_RADIUS_PX * 1.8 / state.viewport.zoom;
+        for (const source of sources) {
+          const desired = refsEqual(source, draggedSource) ? targetPoint : { x: targetPoint.x + (getDotWorld(source).x - sourcePoint.x), y: targetPoint.y + (getDotWorld(source).y - sourcePoint.y) };
+          let nearest = null; let nearestDistance = Infinity;
+          if (refsEqual(source, draggedSource)) nearest = anchorTarget;
+          else candidates.forEach((candidate) => {
+            if (used.has(dotKey(candidate)) || refsEqual(candidate, anchorTarget) || !validConnectionPair(source, candidate)) return;
+            const candidatePoint = getDotWorld(candidate); if (!candidatePoint) return;
+            const distance = Math.hypot(candidatePoint.x - desired.x, candidatePoint.y - desired.y);
+            if (distance <= radiusWorld && distance < nearestDistance) { nearest = candidate; nearestDistance = distance; }
+          });
+          if (!nearest || used.has(dotKey(nearest))) return null;
+          used.add(dotKey(nearest)); targets.push(nearest);
+        }
+        return targets;
+      }
+
+      function setTool(next) {
+        tool = next;
+        strandDrag = null;
+        labelDrag = null;
+        boxSelect = null;
+        document.querySelectorAll('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
+        const mode = tool === 'select' ? 'SELECT MODE' : tool === 'cable' ? 'CABLE MODE · CLICK CANVAS' : tool === 'equipment' ? 'END POINT MODE · CLICK CANVAS' : tool === 'legend' ? 'LEGEND MODE · CLICK CANVAS' : 'WORK ZONE MODE · CLICK CANVAS';
+        $('#canvasMode').textContent = tool === 'endpoint' ? 'END POINT MODE Â· CLICK CANVAS' : tool === 'equipment' ? 'EQUIPMENT MODE Â· CLICK CANVAS' : tool === 'patch' ? 'PATCH CABLE MODE Â· DRAG EQUIPMENT PORT TO STRAND' : mode;
+        renderItems();
+      }
+      function select(type, idValue, refValue = null) { if (type === 'dot' && refValue) selectedDots = [{ ...refValue }]; else if (type !== 'dot') clearDotSelection(); selected = { type, id: idValue }; if (refValue) selected.ref = refValue; render(); if (window.innerWidth <= 760) $('#inspector').classList.add('open'); }
+      function showToast(message, type = '') { clearTimeout(toastTimer); toastEl.textContent = message; toastEl.className = `toast show ${type}`; toastTimer = setTimeout(() => { toastEl.className = 'toast'; }, 3000); }
+      function saveStateLabel(message) { $('#saveState').textContent = message; }
+      function updateCanvasProjectTitle() { const title = $('#canvasProjectTitle'); if (title) title.textContent = state.projectName || 'Untitled Project'; }
+      function updateUndoButton() { const button = $('#undoBtn'); if (button) button.disabled = undoStack.length === 0; }
+      function recordHistory() {
+        if (historySuspended) return;
+        const snapshot = JSON.stringify(serialize());
+        if (undoStack[undoStack.length - 1] === snapshot) return;
+        undoStack.push(snapshot);
+        if (undoStack.length > 100) undoStack.shift();
+        updateUndoButton();
+      }
+      function clearHistory() { undoStack.length = 0; updateUndoButton(); }
+      function undo() {
+        if (!undoStack.length) return;
+        historySuspended = true;
+        try { state = normalize(JSON.parse(undoStack.pop())); } finally { historySuspended = false; }
+        selected = null;
+        clearDotSelection();
+        autosave();
+        render();
+        showToast('Undid last change.');
+      }
+
+      function render() { updateCanvasProjectTitle(); updateTransform(); renderWorkzones(); renderConnections(); renderItems(); renderLegends(); renderInspector(); updateUndoButton(); $('#emptyLayer').style.display = state.cables.length || state.equipment.length || state.workZones.length || state.legends.length ? 'none' : 'block'; }
+      function updateTransform() { const r = canvas.getBoundingClientRect(); const tx = r.width / 2 + state.viewport.x; const ty = r.height / 2 + state.viewport.y; world.setAttribute('transform', `translate(${tx} ${ty}) scale(${state.viewport.zoom})`); $('#zoomReadout').textContent = `${Math.round(state.viewport.zoom * 100)}%`; }
+      function svgEl(tag, attrs = {}) { const el = document.createElementNS('http://www.w3.org/2000/svg', tag); Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v)); return el; }
+      function clearLayer(idValue) { const layer = $(`#${idValue}`); layer.replaceChildren(); return layer; }
+
+      function renderWorkzones() {
+        const layer = clearLayer('workzoneLayer');
+        state.workZones.forEach((zone) => {
+          const group = svgEl('g', { transform: `translate(${zone.x} ${zone.y})`, 'data-workzone-id': zone.id });
+          const rect = svgEl('rect', { width: zone.width, height: zone.height, rx: 8, class: `workzone${selected?.type === 'workzone' && selected.id === zone.id ? ' selected' : ''}` });
+          const title = svgEl('text', { x: 15, y: 25, class: 'workzone-title' }); title.textContent = zone.label || 'Work Zone';
+          const description = svgEl('text', { x: 15, y: 45, class: 'workzone-description' }); description.textContent = zone.description || '';
+          const handle = svgEl('rect', { x: zone.width - 14, y: zone.height - 14, width: 12, height: 12, rx: 2, class: 'workzone-resize-handle' });
+          handle.addEventListener('pointerdown', (event) => startWorkzoneResize(event, zone.id));
+          group.append(rect, title, description, handle);
+          group.addEventListener('pointerdown', (event) => startItemDrag(event, 'workzone', zone.id));
+          group.addEventListener('click', (event) => { event.stopPropagation(); select('workzone', zone.id); });
+          layer.append(group);
+        });
+      }
+
+      function renderConnections() {
+        const layer = clearLayer('connectionLayer');
+        const defs = svg.querySelector('defs'); defs?.querySelectorAll('[data-connection-gradient]').forEach((gradient) => gradient.remove());
+        state.connections.forEach((connection) => {
+          const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return;
+          const path = `M ${a.x} ${a.y} C ${(a.x + b.x) / 2} ${a.y}, ${(a.x + b.x) / 2} ${b.y}, ${b.x} ${b.y}`;
+          const hit = svgEl('path', { d: path, class: 'connection-hit' });
+          const colored = connection.type !== 'patch'; const gradientId = `connection-gradient-${String(connection.id).replace(/[^a-z0-9_-]/gi, '-')}`;
+          if (colored && defs) { const gradient = svgEl('linearGradient', { id: gradientId, x1: 0, y1: 0, x2: 1, y2: 0, 'data-connection-gradient': 'true' }); gradient.append(svgEl('stop', { offset: 0, 'stop-color': connectorColor(connection.from) }), svgEl('stop', { offset: 1, 'stop-color': connectorColor(connection.to) })); defs.append(gradient); }
+          const line = svgEl('path', { d: path, class: `connection-line${colored ? ' colored' : ' patch'}${selected?.type === 'connection' && selected.id === connection.id ? ' selected' : ''}` });
+          if (colored && defs) line.setAttribute('style', `stroke: url(#${gradientId}) !important`);
+          const selectConnection = (event) => { event.stopPropagation(); select('connection', connection.id); };
+          [hit, line].forEach((el) => { el.addEventListener('pointerdown', selectConnection); el.addEventListener('click', selectConnection); });
+          layer.append(hit, line);
+        });
+        const previewLayer = clearLayer('previewLayer');
+        if (boxSelect) {
+          const left = Math.min(boxSelect.start.x, boxSelect.current.x); const top = Math.min(boxSelect.start.y, boxSelect.current.y); const width = Math.abs(boxSelect.current.x - boxSelect.start.x); const height = Math.abs(boxSelect.current.y - boxSelect.start.y);
+          previewLayer.append(svgEl('rect', { x: left, y: top, width, height, class: 'selection-box' }));
+        }
+        if (strandDrag) {
+          const sources = strandDrag.sources || [strandDrag.from];
+          const targets = strandDrag.snapTargets?.length ? strandDrag.snapTargets : (strandDrag.snapTarget ? [strandDrag.snapTarget] : []);
+          sources.forEach((source, index) => {
+            const a = getDotWorld(source); const targetRef = targets[index]; const current = targetRef ? getDotWorld(targetRef) : (refsEqual(source, strandDrag.from) ? strandDrag.current : null);
+            if (!a || !current) return;
+            const p = `M ${a.x} ${a.y} C ${(a.x + current.x) / 2} ${a.y}, ${(a.x + current.x) / 2} ${current.y}, ${current.x} ${current.y}`;
+            previewLayer.append(svgEl('path', { d: p, class: 'preview-line' }));
+            if (targetRef) previewLayer.append(svgEl('circle', { cx: current.x, cy: current.y, r: 12, fill: 'rgba(36,183,255,.12)', stroke: '#24b7ff', 'stroke-width': 2, 'stroke-dasharray': '3 2', 'pointer-events': 'none' }));
+          });
+        }
+      }
+
+      function renderItems() {
+        const layer = clearLayer('itemLayer');
+        state.cables.forEach((cable) => renderCable(cable, layer));
+        state.equipment.forEach((equipment) => renderEquipment(equipment, layer));
+      }
+
+      function renderLegendIcon(type, x, y, parent, scale = 1) {
+        const icon = svgEl('g', { transform: `translate(${x} ${y}) scale(${scale})` });
+        if (type === 'patch') {
+          icon.append(svgEl('circle', { cx: 3, cy: 8, r: 3, fill: '#f8fafc', stroke: '#d55b00', 'stroke-width': 1.2 }), svgEl('path', { d: 'M 6 8 C 11 2, 17 14, 24 8', fill: 'none', stroke: '#d55b00', 'stroke-width': 2, 'stroke-dasharray': '4 2' }), svgEl('circle', { cx: 27, cy: 8, r: 3, fill: '#f8fafc', stroke: '#d55b00', 'stroke-width': 1.2 }));
+        } else if (type === 'fiber') {
+          ['#1a73e8', '#f57c00', '#2e7d32'].forEach((color, index) => icon.append(svgEl('path', { d: `M 2 ${4 + index * 5} C 9 ${1 + index * 5}, 17 ${7 + index * 5}, 26 ${4 + index * 5}`, fill: 'none', stroke: color, 'stroke-width': 1.6 })));
+        } else if (type === 'equipment') {
+          icon.append(svgEl('rect', { x: 2, y: 1, width: 25, height: 15, rx: 3, fill: 'rgba(36,183,255,.18)', stroke: '#24b7ff', 'stroke-width': 1.5 }), svgEl('line', { x1: 4, y1: 5, x2: 25, y2: 5, stroke: '#24b7ff', 'stroke-width': 1 }), svgEl('circle', { cx: 7, cy: 11, r: 1.5, fill: '#24b7ff' }), svgEl('circle', { cx: 12, cy: 11, r: 1.5, fill: '#24b7ff' }));
+        } else {
+          icon.append(svgEl('rect', { x: 8, y: 0, width: 13, height: 18, rx: 2, fill: '#10202b', stroke: '#f7d54a', 'stroke-width': 1.5 }), svgEl('rect', { x: 4, y: 4, width: 5, height: 3, rx: 1, fill: '#1a73e8' }), svgEl('rect', { x: 20, y: 11, width: 5, height: 3, rx: 1, fill: '#2e7d32' }));
+        }
+        parent.append(icon);
+      }
+
+      function renderLegends() {
+        const layer = clearLayer('legendLayer');
+        state.legends.forEach((legend) => {
+          const width = clamp(num(legend.width, 230), 180, 900); const height = clamp(num(legend.height, 220), 180, 1200); const group = svgEl('g', { transform: `translate(${legend.x} ${legend.y})`, 'data-legend-id': legend.id });
+          group.addEventListener('pointerdown', (event) => startItemDrag(event, 'legend', legend.id));
+          group.addEventListener('click', (event) => { if (!event.target.closest('.legend-resize-handle')) { event.stopPropagation(); select('legend', legend.id); } });
+          const card = svgEl('rect', { width, height, rx: 8, class: `legend-card${selected?.type === 'legend' && selected.id === legend.id ? ' selected' : ''}` });
+          const scale = clamp(Math.min(width / 230, height / 220), .6, 3); const headerHeight = 34 * scale; const header = svgEl('rect', { width, height: headerHeight, rx: 8, class: 'legend-header' });
+          const title = svgEl('text', { x: 14 * scale, y: 22 * scale, class: 'legend-title', 'font-size': 12 * scale }); title.textContent = legend.title || 'DIAGRAM LEGEND';
+          const columns = width >= 330 * scale ? 2 : 1; const rows = Math.ceil(LEGEND_ITEMS.length / columns); const rowHeight = Math.max(24 * scale, (height - 48 * scale) / rows); const columnWidth = width / columns;
+          const rowsLayer = svgEl('g');
+          LEGEND_ITEMS.forEach((item, index) => { const column = Math.floor(index / rows); const row = index % rows; const x = column * columnWidth + 14 * scale; const y = 42 * scale + (row + .5) * rowHeight; renderLegendIcon(item.key, x, y - 10 * scale, rowsLayer, scale); const label = svgEl('text', { x: x + 38 * scale, y, class: 'legend-row-label', 'font-size': 9 * scale }); label.textContent = item.label; rowsLayer.append(label); });
+          const handle = svgEl('rect', { x: width - 14, y: height - 14, width: 12, height: 12, rx: 2, class: 'legend-resize-handle' }); handle.addEventListener('pointerdown', (event) => startLegendResize(event, legend.id));
+          group.append(card, header, title, rowsLayer, handle); layer.append(group);
+        });
+      }
+
+      function renderCable(cable, parent) {
+        const size = cableSize(cable);
+        const group = svgEl('g', { transform: `translate(${cable.x} ${cable.y})`, 'data-cable-id': cable.id });
+        group.addEventListener('pointerdown', (event) => startItemDrag(event, 'cable', cable.id));
+        group.addEventListener('click', (event) => { if (!event.target.closest('.tube-row-hit, .strand-hit, .strand-line-hit, .strand-area-hit')) { event.stopPropagation(); select('cable', cable.id); } });
+        const trunk = svgEl('rect', { x: size.leftW, y: 0, width: L.TRUNK, height: size.height, rx: 11, class: `cable-trunk${selected?.type === 'cable' && selected.id === cable.id ? ' selected' : ''}` });
+        const lines = svgEl('rect', { x: size.leftW + 8, y: 5, width: L.TRUNK - 16, height: size.height - 10, rx: 8, class: 'trunk-lines' });
+        const location = svgEl('text', { x: size.leftW + L.TRUNK / 2, y: 29, class: 'trunk-location' }); location.textContent = 'BUILDING';
+        const name = svgEl('text', { x: size.leftW + L.TRUNK / 2, y: 61, class: 'trunk-name', 'textLength': 160, 'lengthAdjust': 'spacingAndGlyphs' }); name.textContent = cable.name || 'BUILDING';
+        const segment = svgEl('text', { x: size.leftW + L.TRUNK / 2, y: 99, class: 'trunk-cable-display', 'textLength': 160, 'lengthAdjust': 'spacingAndGlyphs' }); segment.textContent = `${cable.cableName || 'CABLE'} - ${cable.cableSegment || '1'}`;
+        const meta = svgEl('text', { x: size.leftW + L.TRUNK / 2, y: size.height - 25, class: 'trunk-meta', 'textLength': 160, 'lengthAdjust': 'spacingAndGlyphs' }); meta.textContent = `${cable.fiberCount} CABLE`;
+        group.append(trunk, lines, location, name, segment, meta);
+        renderBreakout(cable, 'left', group);
+        renderBreakout(cable, 'right', group);
+        parent.append(group);
+      }
+
+      function renderTrunkEndLabel(cable, side, parent, offsetX, width) {
+        const captionText = side === 'left' ? 'FROM' : 'TO'; const valueText = side === 'left' ? (cable.from || '—') : (cable.to || '—'); const boxWidth = clamp(Math.max(captionText.length * 5.5, String(valueText).length * 6.2) + 22, 64, 150); const labelOffset = side === 'left' ? (cable.fromLabelOffset || { x: 0, y: 0 }) : (cable.toLabelOffset || { x: 0, y: 0 }); const boxX = offsetX + (width - boxWidth) / 2 + num(labelOffset.x); const boxY = -39 + num(labelOffset.y);
+        const group = svgEl('g', { class: 'trunk-end-label-group', 'data-trunk-label-side': side });
+        group.addEventListener('pointerdown', (event) => startTrunkLabelDrag(event, cable.id, side));
+        group.addEventListener('click', (event) => { event.stopPropagation(); select('cable', cable.id); });
+        const box = svgEl('rect', { x: boxX, y: boxY, width: boxWidth, height: 27, rx: 4, class: 'trunk-end-box' });
+        const caption = svgEl('text', { x: boxX + boxWidth / 2, y: boxY + 9, class: 'trunk-end-caption' }); caption.textContent = captionText;
+        const value = svgEl('text', { x: boxX + boxWidth / 2, y: boxY + 21, class: 'trunk-end-value' }); value.textContent = valueText;
+        group.append(box, caption, value); parent.append(group);
+      }
+
+      function renderBreakout(cable, side, parent) {
+        const size = cableSize(cable); const width = side === 'left' ? size.leftW : size.rightW; const offsetX = side === 'left' ? 0 : size.leftW + L.TRUNK; const isLeft = side === 'left'; const expanded = sideExpanded(cable, side); let y = L.TUBE_PAD;
+        renderTrunkEndLabel(cable, side, parent, offsetX, width);
+        visibleTubes(cable).forEach((tubeIdx) => {
+          const info = tubeInfo(cable, tubeIdx); const pillX = isLeft ? offsetX + width - L.PILL_W - 2 : offsetX + 2; const pillY = y + (L.TUBE_H - L.PILL_H) / 2; const pillCY = y + L.TUBE_H / 2; const labelX = isLeft ? pillX - 6 : pillX + L.PILL_W + 6; const labelAnchor = isLeft ? 'end' : 'start';
+          const rowHit = svgEl('rect', { x: offsetX, y, width, height: L.TUBE_H, class: 'tube-row-hit' });
+          rowHit.addEventListener('click', (event) => { event.stopPropagation(); toggleTube(cable.id, side, tubeIdx); });
+          const label = svgEl('text', { x: labelX, y: pillCY + 3, class: `tube-label${expanded.includes(tubeIdx) ? ' expanded' : ''}`, 'text-anchor': labelAnchor }); label.textContent = info.label;
+          const pill = svgEl('rect', { x: pillX, y: pillY, width: L.PILL_W, height: L.PILL_H, rx: 6, class: 'tube-pill', fill: `${info.base.hex}dd` });
+          pill.addEventListener('click', (event) => { event.stopPropagation(); toggleTube(cable.id, side, tubeIdx); });
+          parent.append(rowHit, label, pill);
+          if (info.binder.hex) { const binder = svgEl('line', { x1: pillX + 3, y1: pillCY, x2: pillX + L.PILL_W - 3, y2: pillCY, stroke: info.binder.hex, 'stroke-width': 2, 'stroke-linecap': 'round' }); parent.append(binder); }
+          y += L.TUBE_H;
+          if (expanded.includes(tubeIdx)) {
+            const blockTop = y + L.STRAND_PAD; const dotX = isLeft ? pillX - L.FAN_GAP : pillX + L.PILL_W + L.FAN_GAP;
+            for (let strandIdx = 0; strandIdx < info.count; strandIdx += 1) {
+              const strand = strandInfo(cable, tubeIdx, strandIdx); const dotY = blockTop + strandIdx * L.STRAND_STEP + L.STRAND_STEP / 2; const startX = isLeft ? pillX : pillX + L.PILL_W; const cp = (startX + dotX) / 2; const refPreview = { cableId: cable.id, side, tubeIdx, strandIdx }; const selectedDot = dotIsSelected(refPreview); const hot = hoverDot && refsEqual(hoverDot, refPreview);
+              const strandPath = `M ${startX} ${pillCY} C ${cp} ${pillCY}, ${cp} ${dotY}, ${dotX} ${dotY}`;
+              const strandAreaHit = svgEl('rect', { x: Math.min(startX, dotX) - 24, y: dotY - 10, width: Math.abs(dotX - startX) + 48, height: 20, class: 'strand-area-hit', fill: '#ffffff', opacity: 0, 'pointer-events': 'all', cursor: 'pointer' });
+              const strandHit = svgEl('path', { d: strandPath, class: 'strand-line-hit', fill: 'none', stroke: '#ffffff', opacity: 0, 'stroke-width': 18, 'pointer-events': 'all', cursor: 'pointer' });
+              const line = svgEl('path', { d: strandPath, class: 'fan-line', stroke: strand.color.hex, 'pointer-events': 'none' });
+              const labelX2 = isLeft ? dotX - 10 : dotX + 10; const label2 = svgEl('text', { x: labelX2, y: dotY + 3, class: 'strand-label', 'text-anchor': isLeft ? 'end' : 'start' }); label2.textContent = strand.label;
+              const ref = { cableId: cable.id, side, tubeIdx, strandIdx };
+              const dot = svgEl('circle', { cx: dotX, cy: dotY, r: L.STRAND_R, class: `strand-dot${selectedDot ? ' selected' : ''}${hot ? ' hot' : ''}`, fill: strand.color.hex, 'data-dot-key': dotKey(ref), 'pointer-events': 'all' });
+              const hit = svgEl('circle', { cx: dotX, cy: dotY, r: 18, class: 'strand-hit', fill: '#ffffff', opacity: '0', 'pointer-events': 'all' });
+              const selectDot = (event) => { event.stopPropagation(); setDotSelection(ref, event.shiftKey); };
+              strandAreaHit.addEventListener('pointerdown', selectDot);
+              strandAreaHit.addEventListener('click', selectDot);
+              strandHit.addEventListener('pointerdown', selectDot);
+              strandHit.addEventListener('click', selectDot);
+              dot.addEventListener('pointerdown', (event) => startStrandDrag(event, ref));
+              dot.addEventListener('click', selectDot);
+              hit.addEventListener('pointerdown', (event) => startStrandDrag(event, ref)); hit.addEventListener('pointerenter', () => { hoverDot = ref; renderItems(); }); hit.addEventListener('pointerleave', () => { hoverDot = null; renderItems(); }); hit.addEventListener('click', selectDot);
+              parent.append(strandAreaHit, strandHit, line, label2, dot, hit);
+            }
+            y += L.STRAND_PAD * 2 + info.count * L.STRAND_STEP;
+          }
+        });
+      }
+
+      function renderEquipment(equipment, parent) {
+        const size = equipmentSize(equipment); const width = size.width; const height = size.height; const group = svgEl('g', { transform: `translate(${equipment.x} ${equipment.y})`, 'data-equipment-id': equipment.id });
+        group.addEventListener('pointerdown', (event) => startItemDrag(event, 'equipment', equipment.id)); group.addEventListener('click', (event) => { if (!event.target.closest('.equipment-port-hit')) { event.stopPropagation(); select('equipment', equipment.id); } });
+        const rect = svgEl('rect', { x: 0, y: 0, width, height, rx: 10, class: `node-card${selected?.type === 'equipment' && selected.id === equipment.id ? ' selected' : ''}` });
+        const header = svgEl('line', { x1: 0, y1: 48, x2: width, y2: 48, stroke: 'rgba(255,255,255,.08)' });
+        const title = svgEl('text', { x: 14, y: 23, class: 'node-title' }); title.textContent = equipment.name || 'Equipment';
+        const subtitle = svgEl('text', { x: 14, y: 39, class: 'node-subtitle' }); subtitle.textContent = `${equipment.building || 'NO BUILDING'} · ${equipmentTotalPorts(equipment)} PORTS`;
+        const resizeHandle = svgEl('rect', { x: width - 14, y: height - 14, width: 12, height: 12, rx: 2, class: 'equipment-resize-handle' });
+        resizeHandle.addEventListener('pointerdown', (event) => startEquipmentResize(event, equipment.id));
+        group.append(rect, header, title, subtitle, resizeHandle);
+        const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right'];
+        sides.forEach((side) => {
+          for (let index = 0; index < equipment.ports; index += 1) {
+            const y = 54 + index * 26 + 13; const portX = side === 'left' ? -13 : width + 13; const labelX = side === 'left' ? 12 : width - 12; const anchor = side === 'left' ? 'start' : 'end'; const label = svgEl('text', { x: labelX, y: y + 3, class: 'port-label', 'text-anchor': anchor }); label.textContent = equipment.portLabels?.[index] || `P-${index + 1}`; const ref = { equipmentId: equipment.id, side, tubeIdx: 0, strandIdx: index }; const circle = svgEl('circle', { cx: portX, cy: y, r: 5.3, class: `node-port${dotIsSelected(ref) ? ' selected' : ''}${hoverDot && refsEqual(hoverDot, ref) ? ' hot' : ''}` }); circle.setAttribute('style', `fill:${connectorColor(ref)}`); const hit = svgEl('circle', { cx: portX, cy: y, r: 20, class: 'equipment-port-hit', fill: 'transparent' }); hit.addEventListener('pointerdown', (event) => startStrandDrag(event, ref)); hit.addEventListener('pointerenter', () => { hoverDot = ref; renderItems(); }); hit.addEventListener('pointerleave', () => { hoverDot = null; renderItems(); }); hit.addEventListener('click', (event) => { event.stopPropagation(); setDotSelection(ref, event.shiftKey); }); group.append(label, circle, hit);
+          }
+        });
+        parent.append(group);
+      }
+
+      function toggleTube(cableId, side, tubeIdx) { const cable = cableById(cableId); if (!cable) return; recordHistory(); const key = side === 'left' ? 'leftExp' : 'rightExp'; const current = cable[key] || []; cable[key] = current.includes(tubeIdx) ? current.filter((i) => i !== tubeIdx) : [...current, tubeIdx].sort((a, b) => a - b); autosave(); render(); }
+
+      function startItemDrag(event, type, idValue) {
+        if (event.button !== 0 || tool !== 'select' || event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .tube-row-hit, .equipment-resize-handle, .legend-resize-handle')) return;
+        event.stopPropagation(); const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); select(type, idValue); const point = screenToWorld(event.clientX, event.clientY); drag = { type, id: idValue, offsetX: item.x - point.x, offsetY: item.y - point.y, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId);
+      }
+
+      function startWorkzoneResize(event, idValue) {
+        if (event.button !== 0 || tool !== 'select') return;
+        event.stopPropagation();
+        const zone = workzoneById(idValue); if (!zone) return;
+        recordHistory(); select('workzone', idValue);
+        const point = screenToWorld(event.clientX, event.clientY);
+        resize = { id: idValue, startX: point.x, startY: point.y, startWidth: zone.width, startHeight: zone.height, pointerId: event.pointerId };
+        svg.setPointerCapture?.(event.pointerId);
+      }
+
+      function startEquipmentResize(event, idValue) {
+        if (event.button !== 0 || tool !== 'select') return;
+        event.stopPropagation();
+        const equipment = equipmentById(idValue); if (!equipment) return;
+        recordHistory(); select('equipment', idValue);
+        const point = screenToWorld(event.clientX, event.clientY); const size = equipmentSize(equipment);
+        resize = { type: 'equipment', id: idValue, startX: point.x, startY: point.y, startWidth: size.width, startHeight: size.height, pointerId: event.pointerId };
+        svg.setPointerCapture?.(event.pointerId);
+      }
+
+      function startLegendResize(event, idValue) {
+        if (event.button !== 0 || tool !== 'select') return;
+        event.stopPropagation();
+        const legend = legendById(idValue); if (!legend) return;
+        recordHistory(); select('legend', idValue);
+        const point = screenToWorld(event.clientX, event.clientY);
+        resize = { type: 'legend', id: idValue, startX: point.x, startY: point.y, startWidth: legend.width, startHeight: legend.height, pointerId: event.pointerId };
+        svg.setPointerCapture?.(event.pointerId);
+      }
+
+      function startTrunkLabelDrag(event, cableId, side) {
+        if (event.button !== 0 || tool !== 'select') return;
+        event.stopPropagation(); event.preventDefault();
+        const cable = cableById(cableId); if (!cable) return;
+        const key = side === 'left' ? 'fromLabelOffset' : 'toLabelOffset'; const offset = cable[key] || { x: 0, y: 0 };
+        recordHistory(); select('cable', cableId);
+        const point = screenToWorld(event.clientX, event.clientY);
+        labelDrag = { cableId, side, key, startX: point.x, startY: point.y, offsetX: num(offset.x), offsetY: num(offset.y), pointerId: event.pointerId };
+        svg.setPointerCapture?.(event.pointerId);
+      }
+
+      function startStrandDrag(event, ref) {
+        if (event.button !== 0 || (tool !== 'select' && tool !== 'patch')) return;
+        if (tool === 'patch' && !ref.equipmentId) { showToast('Start a patch cable from an End Point or Equipment port.', 'error'); return; }
+        event.stopPropagation(); event.preventDefault();
+        if (event.shiftKey) { setDotSelection(ref, true); strandDrag = null; return; }
+        const sources = dotIsSelected(ref) && selectedDots.length > 1 ? selectedDots.map((item) => ({ ...item })) : [{ ...ref }];
+        if (sources.length === 1) setDotSelection(ref, false);
+        else { selected = { type: 'dot', id: dotKey(ref), ref: { ...ref } }; render(); }
+        const p = getDotWorld(ref); if (!p) { renderItems(); return; }
+        strandDrag = { from: ref, sources, current: p, snapTarget: null, snapTargets: [], pointerId: event.pointerId };
+        svg.setPointerCapture?.(event.pointerId); renderConnections(); renderItems();
+      }
+
+      function finishStrandDrag() {
+        if (!strandDrag) return;
+        const dragState = strandDrag; const sources = dragState.sources || [dragState.from]; const targets = dragState.snapTargets?.length ? dragState.snapTargets : (dragState.snapTarget ? [dragState.snapTarget] : []); const isPatch = tool === 'patch'; strandDrag = null;
+        if (targets.length !== sources.length || !targets.length) { showToast(sources.length > 1 ? 'Select a complete destination set before releasing.' : (isPatch ? 'Patch cable not connected. Release while the cyan snap ring is visible.' : 'Splice not connected. Release while the cyan snap ring is visible.'), 'error'); render(); return; }
+        const targetKeys = new Set();
+        for (let index = 0; index < sources.length; index += 1) {
+          const source = sources[index]; const target = targets[index];
+          if (!target || refsEqual(source, target) || dotAlreadyConnected(source) || dotAlreadyConnected(target) || targetKeys.has(dotKey(target)) || !validConnectionPair(source, target)) { showToast('One or more selected strands cannot be connected.', 'error'); render(); return; }
+          targetKeys.add(dotKey(target));
+        }
+        recordHistory();
+        sources.forEach((source, index) => state.connections.push({ id: id('conn'), from: source, to: targets[index], circuitName: '', type: isPatch ? 'patch' : 'splice' }));
+        clearDotSelection(); selected = null; autosave(); render(); showToast(sources.length > 1 ? `${sources.length} strand connections created.` : (isPatch ? 'Patch cable connection created.' : 'Splice connection created.'));
+      }
+
+      function createCable(x, y) { recordHistory(); const cable = { id: id('cable'), name: `BUILDING-${state.cables.length + 1}`, cableName: `CABLE-${state.cables.length + 1}`, cableSegment: '1', to: '', from: '', fiberCount: 48, x: x - 190, y: y - 220, leftExp: [], rightExp: [], isCollapsed: false, fromLabelOffset: { x: 0, y: 0 }, toLabelOffset: { x: 0, y: 0 } }; state.cables.push(cable); select('cable', cable.id); autosave(); }
+      function createEquipment(x, y, kind = 'endpoint') { recordHistory(); const count = state.equipment.filter((item) => (item.kind || 'endpoint') === kind).length + 1; const equipment = { id: id('equipment'), kind, name: `${kind === 'equipment' ? 'EQUIPMENT' : 'END-POINT'}-${count}`, building: '', ports: 8, portLabels: [], width: 230, height: 54 + 8 * 26 + 16, x: x - 115, y: y - 80, side: 'right' }; state.equipment.push(equipment); select('equipment', equipment.id); autosave(); }
+      function createWorkzone(x, y) { recordHistory(); const zone = { id: id('zone'), x: x - 160, y: y - 90, width: 320, height: 180, label: 'WORK ZONE', description: 'Add notes in the inspector' }; state.workZones.push(zone); select('workzone', zone.id); autosave(); }
+      function createLegend(x, y) { recordHistory(); const legend = { id: id('legend'), x: x - 115, y: y - 110, width: 230, height: 220, title: 'DIAGRAM LEGEND' }; state.legends.push(legend); select('legend', legend.id); autosave(); }
+
+      function updateItem(type, idValue, field, value) { const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); if (field === 'fiberCount') item.fiberCount = clamp(Math.round(num(value, 12)), 1, 5000); else if (field === 'ports') { item.ports = clamp(Math.round(num(value, 8)), 1, 64); item.portLabels = (item.portLabels || []).slice(0, item.ports); } else if (field === 'width' || field === 'height') item[field] = type === 'legend' ? clamp(Math.round(num(value, field === 'width' ? 230 : 300)), field === 'width' ? 180 : 180, field === 'width' ? 900 : 1200) : clamp(Math.round(num(value, 100)), 60, 2000); else item[field] = value; autosave(); if (type === 'legend') render(); else if (field === 'fiberCount' || field === 'ports' || field === 'side' || field === 'isCollapsed') render(); else { renderItems(); renderWorkzones(); renderConnections(); }
+      }
+
+      function renderInspector() {
+        const content = $('#inspectorContent');
+        if (!selected || (selected.type === 'dot' && !selected.ref)) { content.innerHTML = `<h2>Workspace</h2><p class="sub">A local-first fiber splice diagram editor based on the supplied workspace concept.</p><div class="notice">Place a cable or end point from the toolbar. Expand a tube by clicking its colored pill, then drag a strand dot to another strand dot to create a splice.</div><div class="section"><h3>Browser storage</h3><div class="meta-grid"><div class="meta-card"><div class="k">Project</div><div class="v">${esc(state.projectName)}</div></div><div class="meta-card"><div class="k">Items</div><div class="v">${state.cables.length + state.equipment.length + state.workZones.length}</div></div></div><div class="button-row" style="margin-top:10px"><button class="button" id="saveNowBtn">Save locally</button><button class="button" id="showProjectsBtn">Project list</button></div></div><div class="section"><h3>Current tool</h3><p class="sub">${tool === 'cable' ? 'Click the canvas to place a cable.' : tool === 'equipment' ? 'Click the canvas to place an end point.' : tool === 'workzone' ? 'Click the canvas to place a work zone.' : 'Select and drag items. Use middle/right drag to pan.'}</p></div>`; $('#saveNowBtn')?.addEventListener('click', () => { autosave(); showToast('Saved to this browser.'); }); $('#showProjectsBtn')?.addEventListener('click', openProjects); return; }
+        if (selected.type === 'cable') renderCableInspector(cableById(selected.id));
+        else if (selected.type === 'equipment') renderEquipmentInspector(equipmentById(selected.id));
+        else if (selected.type === 'workzone') renderWorkzoneInspector(workzoneById(selected.id));
+        else if (selected.type === 'legend') renderLegendInspector(legendById(selected.id));
+        else if (selected.type === 'connection') renderConnectionInspector(state.connections.find((c) => c.id === selected.id));
+        else { const count = Math.max(1, selectedDots.length); content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Shift-click connectors to select a group, then drag from any selected connector to the matching destination set.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`; $('#disconnectDotBtn').addEventListener('click', disconnectSelected); }
+      }
+
+      function renderCableInspector(cable) {
+        if (!cable) return;
+        const preset = PRESETS.map((n) => `<option value="${n}" ${n === cable.fiberCount ? 'selected' : ''}>${n} fibers</option>`).join('');
+        const custom = !PRESETS.includes(Number(cable.fiberCount));
+        $('#inspectorContent').innerHTML = `<h2>Cable trunk</h2><p class="sub">The vertical trunk is the cable body. Expand individual tube rows on either side to expose the 12 strands inside.</p><div class="field"><label>Building name</label><input id="cableBuildingName" value="${esc(cable.name)}" placeholder="Building name"></div><div class="field"><label>Cable Name</label><input id="cableCableName" value="${esc(cable.cableName || '')}" placeholder="Cable name"></div><div class="field"><label>Cable Segment</label><input id="cableCableSegment" value="${esc(cable.cableSegment || '1')}" placeholder="Segment number or label"></div><div class="field-row"><div class="field"><label>From</label><input id="cableFrom" value="${esc(cable.from)}"></div><div class="field"><label>To</label><input id="cableTo" value="${esc(cable.to)}"></div></div><div class="field"><label>Fiber count</label><select id="cableCount">${preset}<option value="custom" ${custom ? 'selected' : ''}>Custom…</option></select></div><div class="field" id="customFiberField" style="display:${custom ? 'block' : 'none'}"><label>Custom fibers</label><input id="customFiberCount" type="number" min="1" max="5000" value="${cable.fiberCount}"></div><div class="section"><h3>Construction</h3><div class="meta-grid"><div class="meta-card"><div class="k">Tubes</div><div class="v">${cableTubes(cable)}</div></div><div class="meta-card"><div class="k">Fibers / tube</div><div class="v">12 max</div></div></div></div><div class="section"><h3>Display</h3><div class="button-row"><button class="button" id="expandLeftBtn">Expand left first tube</button><button class="button" id="expandRightBtn">Expand right first tube</button></div><label style="display:flex;align-items:center;gap:7px;margin-top:11px;color:#a5bdca;font-size:11px"><input id="collapseCable" type="checkbox" ${cable.isCollapsed ? 'checked' : ''}> Hide unused tube rows</label></div><div class="section"><div class="button-row"><button class="button danger" id="deleteSelected">Delete cable</button></div></div>`;
+        $('#cableBuildingName').addEventListener('input', (e) => updateItem('cable', cable.id, 'name', e.target.value));
+        $('#cableCableName').addEventListener('input', (e) => updateItem('cable', cable.id, 'cableName', e.target.value));
+        $('#cableCableSegment').addEventListener('input', (e) => updateItem('cable', cable.id, 'cableSegment', e.target.value));
+        $('#cableFrom').addEventListener('input', (e) => updateItem('cable', cable.id, 'from', e.target.value));
+        $('#cableTo').addEventListener('input', (e) => updateItem('cable', cable.id, 'to', e.target.value));
+        $('#cableCount').addEventListener('change', (e) => { $('#customFiberField').style.display = e.target.value === 'custom' ? 'block' : 'none'; if (e.target.value !== 'custom') updateItem('cable', cable.id, 'fiberCount', e.target.value); });
+        $('#customFiberCount').addEventListener('input', (e) => updateItem('cable', cable.id, 'fiberCount', e.target.value));
+        $('#collapseCable').addEventListener('change', (e) => updateItem('cable', cable.id, 'isCollapsed', e.target.checked));
+        $('#expandLeftBtn').addEventListener('click', () => toggleTube(cable.id, 'left', 0));
+        $('#expandRightBtn').addEventListener('click', () => toggleTube(cable.id, 'right', 0));
+        $('#deleteSelected').addEventListener('click', deleteSelected);
+      }
+
+      function renderEquipmentInspector(equipment) {
+        if (!equipment) return; const itemType = equipment.kind === 'equipment' ? 'Equipment' : 'End Point'; const portRows = Array.from({ length: equipment.ports }, (_, i) => `<div class="port-label-row"><span>${String(i + 1).padStart(2, '0')}</span><input data-port-index="${i}" value="${esc(equipment.portLabels?.[i] || `P-${i + 1}`)}"></div>`).join(''); $('#inspectorContent').innerHTML = `<h2>${itemType}</h2><p class="sub">${itemType} provides terminal ports for splicing and patch cables. Ports are counted per side; Both exposes twice the total. Port labels stay with the local browser project.</p><div class="field"><label>${itemType} name</label><input id="equipmentName" value="${esc(equipment.name)}"></div><div class="field"><label>Building / location</label><input id="equipmentBuilding" value="${esc(equipment.building)}"></div><div class="field-row"><div class="field"><label>Ports per side</label><input id="equipmentPorts" type="number" min="1" max="64" value="${equipment.ports}"></div><div class="field"><label>Port side</label><select id="equipmentSide"><option value="left" ${equipment.side === 'left' ? 'selected' : ''}>Left</option><option value="right" ${equipment.side === 'right' ? 'selected' : ''}>Right</option><option value="both" ${equipment.side === 'both' ? 'selected' : ''}>Both</option></select></div></div><div class="section"><h3>Port labels</h3><div class="port-label-list">${portRows}</div></div><div class="section"><button class="button danger" id="deleteSelected">Delete ${itemType}</button></div>`; $('#equipmentName').addEventListener('input', (e) => updateItem('equipment', equipment.id, 'name', e.target.value)); $('#equipmentBuilding').addEventListener('input', (e) => updateItem('equipment', equipment.id, 'building', e.target.value)); $('#equipmentPorts').addEventListener('change', (e) => updateItem('equipment', equipment.id, 'ports', e.target.value)); $('#equipmentSide').addEventListener('change', (e) => updateItem('equipment', equipment.id, 'side', e.target.value)); document.querySelectorAll('[data-port-index]').forEach((input) => input.addEventListener('input', (e) => { equipment.portLabels[Number(e.target.dataset.portIndex)] = e.target.value; autosave(); renderItems(); renderConnections(); })); $('#deleteSelected').addEventListener('click', deleteSelected);
+      }
+
+      function renderWorkzoneInspector(zone) {
+        if (!zone) return; $('#inspectorContent').innerHTML = `<h2>Work zone</h2><p class="sub">Use a work zone to label a splice vault, room, building, or construction area.</p><div class="field"><label>Label</label><input id="zoneLabel" value="${esc(zone.label)}"></div><div class="field"><label>Description</label><textarea id="zoneDescription">${esc(zone.description)}</textarea></div><div class="field-row"><div class="field"><label>Width</label><input id="zoneWidth" type="number" value="${zone.width}"></div><div class="field"><label>Height</label><input id="zoneHeight" type="number" value="${zone.height}"></div></div><div class="section"><button class="button danger" id="deleteSelected">Delete work zone</button></div>`; $('#zoneLabel').addEventListener('input', (e) => updateItem('workzone', zone.id, 'label', e.target.value)); $('#zoneDescription').addEventListener('input', (e) => updateItem('workzone', zone.id, 'description', e.target.value)); $('#zoneWidth').addEventListener('change', (e) => updateItem('workzone', zone.id, 'width', e.target.value)); $('#zoneHeight').addEventListener('change', (e) => updateItem('workzone', zone.id, 'height', e.target.value)); $('#deleteSelected').addEventListener('click', deleteSelected);
+      }
+
+      function renderLegendInspector(legend) {
+        if (!legend) return; $('#inspectorContent').innerHTML = `<h2>Legend</h2><p class="sub">Drag the legend by its body. Use the lower-right handle to adjust its size.</p><div class="field"><label>Title</label><input id="legendTitle" value="${esc(legend.title)}"></div><div class="field-row"><div class="field"><label>Width</label><input id="legendWidth" type="number" min="180" max="900" value="${legend.width}"></div><div class="field"><label>Height</label><input id="legendHeight" type="number" min="180" max="1200" value="${legend.height}"></div></div><div class="section"><button class="button danger" id="deleteSelected">Delete legend</button></div>`; $('#legendTitle').addEventListener('input', (e) => updateItem('legend', legend.id, 'title', e.target.value)); $('#legendWidth').addEventListener('change', (e) => updateItem('legend', legend.id, 'width', e.target.value)); $('#legendHeight').addEventListener('change', (e) => updateItem('legend', legend.id, 'height', e.target.value)); $('#deleteSelected').addEventListener('click', deleteSelected);
+      }
+
+      function renderConnectionInspector(connection) { if (!connection) return; const isPatch = connection.type === 'patch'; const title = isPatch ? 'Patch cable' : 'Splice connection'; const description = isPatch ? 'This patch cable links an End Point or Equipment port to an OSP fiber strand.' : 'This is a strand-to-strand splice connection.'; const nameLabel = isPatch ? 'Patch cable name' : 'Circuit name'; $('#inspectorContent').innerHTML = `<h2>${title}</h2><p class="sub">${description}</p><div class="field"><label>${nameLabel}</label><input id="connectionName" value="${esc(connection.circuitName || '')}" placeholder="e.g. CORE-S1-P24"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">From</div><div class="v">${esc(dotKey(connection.from))}</div></div><div class="meta-card"><div class="k">To</div><div class="v">${esc(dotKey(connection.to))}</div></div></div></div><div class="section"><button class="button danger" id="disconnectSelected">Disconnect</button></div>`; $('#connectionName').addEventListener('input', (e) => { connection.circuitName = e.target.value; autosave(); }); $('#disconnectSelected').addEventListener('click', disconnectSelected); }
+
+      function disconnectSelected() { if (selected?.type === 'connection') { const before = state.connections.length; const next = state.connections.filter((c) => c.id !== selected.id); if (next.length === before) { showToast('Connection no longer exists.', 'error'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast('Connection disconnected.'); return; } if (!selected?.ref) return; const refs = selectedDots.length ? selectedDots : [selected.ref]; const before = state.connections.length; const next = state.connections.filter((c) => !refs.some((ref) => refsEqual(c.from, ref) || refsEqual(c.to, ref))); if (next.length === before) { showToast('Selected strand(s) are not connected.'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast(refs.length > 1 ? `${refs.length} connections disconnected.` : 'Connection disconnected.'); }
+      function deleteSelected() { if (!selected) return; recordHistory(); if (selected.type === 'cable') { state.connections = state.connections.filter((c) => c.from.cableId !== selected.id && c.to.cableId !== selected.id); state.cables = state.cables.filter((c) => c.id !== selected.id); } else if (selected.type === 'equipment') { state.connections = state.connections.filter((c) => c.from.equipmentId !== selected.id && c.to.equipmentId !== selected.id); state.equipment = state.equipment.filter((e) => e.id !== selected.id); } else if (selected.type === 'workzone') state.workZones = state.workZones.filter((z) => z.id !== selected.id); else if (selected.type === 'legend') state.legends = state.legends.filter((legend) => legend.id !== selected.id); else if (selected.type === 'connection') state.connections = state.connections.filter((c) => c.id !== selected.id); else if (selected.type === 'dot') { disconnectSelected(); return; } selected = null; clearDotSelection(); autosave(); render(); }
+
+      function fitView() { const bounds = getBounds(); if (!bounds) { state.viewport = { x: 0, y: 0, zoom: 1 }; updateTransform(); return; } const r = canvas.getBoundingClientRect(); const width = Math.max(500, bounds.maxX - bounds.minX + 180); const height = Math.max(350, bounds.maxY - bounds.minY + 180); state.viewport.zoom = clamp(Math.min(r.width / width, r.height / height), .12, 1.4); state.viewport.x = -((bounds.minX + bounds.maxX) / 2) * state.viewport.zoom; state.viewport.y = -((bounds.minY + bounds.maxY) / 2) * state.viewport.zoom; autosave(); updateTransform(); }
+      function getBounds() { const points = []; state.cables.forEach((c) => { const s = cableSize(c); const fromOffset = c.fromLabelOffset || { x: 0, y: 0 }; const toOffset = c.toLabelOffset || { x: 0, y: 0 }; points.push({ x: c.x + fromOffset.x, y: c.y - 45 + fromOffset.y }, { x: c.x + toOffset.x, y: c.y - 45 + toOffset.y }, { x: c.x, y: c.y }, { x: c.x + s.width, y: c.y + s.height }); }); state.equipment.forEach((e) => { const s = equipmentSize(e); points.push({ x: e.x, y: e.y }, { x: e.x + s.width, y: e.y + s.height }); }); state.workZones.forEach((z) => points.push({ x: z.x, y: z.y }, { x: z.x + z.width, y: z.y + z.height })); state.legends.forEach((legend) => points.push({ x: legend.x, y: legend.y }, { x: legend.x + legend.width, y: legend.y + legend.height })); if (!points.length) return null; return { minX: Math.min(...points.map((p) => p.x)), maxX: Math.max(...points.map((p) => p.x)), minY: Math.min(...points.map((p) => p.y)), maxY: Math.max(...points.map((p) => p.y)) }; }
+      function finishBoxSelect() {
+        if (!boxSelect) return;
+        const selection = boxSelect; boxSelect = null;
+        const left = Math.min(selection.start.x, selection.current.x); const right = Math.max(selection.start.x, selection.current.x); const top = Math.min(selection.start.y, selection.current.y); const bottom = Math.max(selection.start.y, selection.current.y);
+        const inside = visibleDotRefs().filter((ref) => { const point = getDotWorld(ref); return point && point.x >= left && point.x <= right && point.y >= top && point.y <= bottom; });
+        const next = selection.additive ? [...selectedDots, ...inside.filter((ref) => !selectedDots.some((item) => refsEqual(item, ref)))] : inside;
+        selectedDots = next;
+        if (!selectedDots.length) { selected = null; render(); showToast('No connectors selected.'); return; }
+        const current = selectedDots[selectedDots.length - 1]; selected = { type: 'dot', id: dotKey(current), ref: current }; render(); showToast(`${selectedDots.length} connector${selectedDots.length === 1 ? '' : 's'} selected.`);
+      }
+      function zoomAt(clientX, clientY, nextZoom) { const r = canvas.getBoundingClientRect(); const before = screenToWorld(clientX, clientY); state.viewport.zoom = clamp(nextZoom, .12, 3.5); state.viewport.x = clientX - r.left - r.width / 2 - before.x * state.viewport.zoom; state.viewport.y = clientY - r.top - r.height / 2 - before.y * state.viewport.zoom; updateTransform(); autosave(); }
+
+      function onCanvasPointerDown(event) { if (event.button === 1 || event.button === 2 || (event.button === 0 && event.shiftKey && !event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit'))) { panDrag = { x: event.clientX, y: event.clientY, panX: state.viewport.x, panY: state.viewport.y, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId); event.preventDefault(); return; } if (event.button !== 0 || event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, [data-cable-id], [data-equipment-id], [data-workzone-id], [data-legend-id]')) return; const p = screenToWorld(event.clientX, event.clientY); if (tool === 'cable') { createCable(p.x, p.y); setTool('select'); } else if (tool === 'endpoint' || tool === 'equipment') { createEquipment(p.x, p.y, tool === 'equipment' ? 'equipment' : 'endpoint'); setTool('select'); } else if (tool === 'workzone') { createWorkzone(p.x, p.y); setTool('select'); } else if (tool === 'legend') { createLegend(p.x, p.y); setTool('select'); } else if (tool === 'select' || tool === 'patch') { boxSelect = { start: p, current: p, additive: event.ctrlKey || event.metaKey, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId); event.preventDefault(); renderConnections(); } }
+      function onPointerMove(event) { if (labelDrag) { const cable = cableById(labelDrag.cableId); if (!cable) return; const point = screenToWorld(event.clientX, event.clientY); cable[labelDrag.key] = { x: labelDrag.offsetX + point.x - labelDrag.startX, y: labelDrag.offsetY + point.y - labelDrag.startY }; renderItems(); renderConnections(); return; } if (resize) { const point = screenToWorld(event.clientX, event.clientY); if (resize.type === 'equipment') { const equipment = equipmentById(resize.id); if (!equipment) return; equipment.width = clamp(resize.startWidth + point.x - resize.startX, 160, 2000); equipment.height = clamp(resize.startHeight + point.y - resize.startY, equipmentMinHeight(equipment), 3000); renderItems(); renderConnections(); } else if (resize.type === 'legend') { const legend = legendById(resize.id); if (!legend) return; legend.width = clamp(resize.startWidth + point.x - resize.startX, 180, 900); legend.height = clamp(resize.startHeight + point.y - resize.startY, 180, 1200); renderLegends(); } else { const zone = workzoneById(resize.id); if (!zone) return; zone.width = clamp(resize.startWidth + point.x - resize.startX, 60, 2000); zone.height = clamp(resize.startHeight + point.y - resize.startY, 60, 2000); renderWorkzones(); } return; } if (panDrag) { state.viewport.x = panDrag.panX + event.clientX - panDrag.x; state.viewport.y = panDrag.panY + event.clientY - panDrag.y; updateTransform(); return; } if (boxSelect) { boxSelect.current = screenToWorld(event.clientX, event.clientY); renderConnections(); return; } if (strandDrag) { const point = screenToWorld(event.clientX, event.clientY); const sources = strandDrag.sources || [strandDrag.from]; strandDrag.snapTargets = findGroupMagneticTargets(point, sources, strandDrag.from) || []; strandDrag.snapTarget = strandDrag.snapTargets[0] || null; strandDrag.current = strandDrag.snapTarget ? getDotWorld(strandDrag.snapTarget) : point; renderConnections(); return; } if (drag) { const item = drag.type === 'cable' ? cableById(drag.id) : drag.type === 'equipment' ? equipmentById(drag.id) : drag.type === 'workzone' ? workzoneById(drag.id) : legendById(drag.id); if (!item) return; const p = screenToWorld(event.clientX, event.clientY); item.x = p.x + drag.offsetX; item.y = p.y + drag.offsetY; renderWorkzones(); renderItems(); renderLegends(); renderConnections(); } }
+      function onPointerUp(event) { if (labelDrag) { labelDrag = null; autosave(); render(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (resize) { resize = null; autosave(); render(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (boxSelect) { finishBoxSelect(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (strandDrag) { finishStrandDrag(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (panDrag) { panDrag = null; autosave(); } if (drag) { drag = null; autosave(); } if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); }
+      function onWheel(event) { event.preventDefault(); zoomAt(event.clientX, event.clientY, state.viewport.zoom * (event.deltaY > 0 ? .9 : 1.1)); }
+
+      function projectIndex() { try { return JSON.parse(localStorage.getItem(STORAGE_INDEX) || '[]'); } catch { return []; } }
+      function setProjectIndex(index) { localStorage.setItem(STORAGE_INDEX, JSON.stringify(index)); }
+      function serialize() { return JSON.parse(JSON.stringify({ ...state, version: 4 })); }
+      function autosave() { if (!currentProjectId) return; const doc = serialize(); doc.updatedAt = new Date().toISOString(); localStorage.setItem(`fiber_splice_project_${currentProjectId}`, JSON.stringify(doc)); const index = projectIndex().filter((p) => p.id !== currentProjectId); index.push({ id: currentProjectId, name: state.projectName, updatedAt: doc.updatedAt }); setProjectIndex(index); localStorage.setItem(STORAGE_CURRENT, currentProjectId); saveStateLabel(`Saved locally · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`); }
+      function loadProject(idValue) { const raw = localStorage.getItem(`fiber_splice_project_${idValue}`); if (!raw) return false; try { state = normalize(JSON.parse(raw)); currentProjectId = idValue; selected = null; clearDotSelection(); clearHistory(); render(); saveStateLabel('Loaded from browser storage'); return true; } catch { return false; } }
+      function createProject(name) { currentProjectId = id('project'); state = blankState(name || 'Untitled Project'); clearDotSelection(); clearHistory(); autosave(); selected = null; render(); }
+      function loadStartup() { const index = projectIndex(); const current = localStorage.getItem(STORAGE_CURRENT); const candidate = current || index.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt))[0]?.id; if (!(candidate && loadProject(candidate))) createProject('Untitled Project'); }
+      function openProjects() { const list = $('#projectList'); const entries = projectIndex().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt)); list.innerHTML = entries.length ? entries.map((p) => `<div class="project-list-item"><button data-project-id="${esc(p.id)}"><b>${esc(p.name)}</b><br><small>${new Date(p.updatedAt).toLocaleString()}</small></button><button class="icon-button" data-delete-project="${esc(p.id)}" title="Delete project">×</button></div>`).join('') : '<div class="notice">No saved projects yet.</div>'; list.querySelectorAll('[data-project-id]').forEach((button) => button.addEventListener('click', () => { if (loadProject(button.dataset.projectId)) { $('#projectsModal').classList.remove('open'); showToast('Project loaded.'); } })); list.querySelectorAll('[data-delete-project]').forEach((button) => button.addEventListener('click', () => { const idValue = button.dataset.deleteProject; localStorage.removeItem(`fiber_splice_project_${idValue}`); setProjectIndex(projectIndex().filter((p) => p.id !== idValue)); if (idValue === currentProjectId) createProject('Untitled Project'); openProjects(); })); $('#projectsModal').classList.add('open'); }
+      function dxfNumber(value) { return Number(value || 0).toFixed(3); }
+      function dxfAci(abb) { return ({ BL: 5, OR: 30, GR: 3, BR: 33, SL: 8, WH: 7, RD: 1, BK: 250, YL: 2, VI: 200, RS: 6, AQ: 4 })[abb] || 7; }
+      function dxfLine(layer, x1, y1, x2, y2) { return `0\nLINE\n8\n${layer}\n10\n${dxfNumber(x1)}\n20\n${dxfNumber(-y1)}\n30\n0.0\n11\n${dxfNumber(x2)}\n21\n${dxfNumber(-y2)}\n31\n0.0\n`; }
+      function dxfCircle(layer, x, y, radius) { return `0\nCIRCLE\n8\n${layer}\n10\n${dxfNumber(x)}\n20\n${dxfNumber(-y)}\n30\n0.0\n40\n${dxfNumber(radius)}\n`; }
+      function dxfSolid(layer, x, y, width, height) { const yTop = -y; const yBottom = -(y + height); return `0\nSOLID\n8\n${layer}\n10\n${dxfNumber(x)}\n20\n${dxfNumber(yTop)}\n30\n0.0\n11\n${dxfNumber(x + width)}\n21\n${dxfNumber(yTop)}\n31\n0.0\n12\n${dxfNumber(x)}\n22\n${dxfNumber(yBottom)}\n32\n0.0\n13\n${dxfNumber(x + width)}\n23\n${dxfNumber(yBottom)}\n33\n0.0\n`; }
+      function dxfText(layer, text, x, y, height, rotation = 0) { const clean = String(text || '').replace(/[^\x20-\x7E]/g, ' '); return `0\nTEXT\n8\n${layer}\n10\n${dxfNumber(x)}\n20\n${dxfNumber(-y)}\n30\n0.0\n40\n${dxfNumber(height)}\n1\n${clean}\n50\n${dxfNumber(rotation)}\n`; }
+      function dxfRect(layer, x, y, width, height) { return dxfLine(layer, x, y, x + width, y) + dxfLine(layer, x + width, y, x + width, y + height) + dxfLine(layer, x + width, y + height, x, y + height) + dxfLine(layer, x, y + height, x, y); }
+      function cubicPoints(a, c1, c2, b, segments = 18) { const points = []; for (let i = 0; i <= segments; i += 1) { const t = i / segments; const mt = 1 - t; points.push({ x: mt * mt * mt * a.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * b.x, y: mt * mt * mt * a.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * b.y }); } return points; }
+      function dxfCurve(layer, points, lineWidth = 0.25) { if (!points || points.length < 2) return ''; const vertices = points.map((point) => `0\nVERTEX\n8\n${layer}\n10\n${dxfNumber(point.x)}\n20\n${dxfNumber(-point.y)}\n30\n0.0\n70\n0\n`).join(''); return `0\nPOLYLINE\n8\n${layer}\n66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n40\n${dxfNumber(lineWidth)}\n41\n${dxfNumber(lineWidth)}\n70\n0\n${vertices}0\nSEQEND\n8\n${layer}\n`; }
+      function dxfLayerTable() {
+        const layers = [
+          ['0', 7], ['CABLE_TRUNKS', 8], ['END_POINTS', 4], ['WORK_ZONES', 3], ['SPLICES', 2], ['PATCH_CABLES', 30], ['LABELS', 7],
+          ...COLORS.map((color) => [`TUBE_${color.abb}`, dxfAci(color.abb)]),
+          ...COLORS.map((color) => [`FIBER_${color.abb}`, dxfAci(color.abb)])
+        ];
+        let table = `0\nTABLE\n2\nLAYER\n70\n${layers.length}\n`;
+        layers.forEach(([name, color]) => { table += `0\nLAYER\n2\n${name}\n70\n0\n62\n${color}\n6\nCONTINUOUS\n`; });
+        return `${table}0\nENDTAB\n`;
+      }
+      function tubeRowGeometry(cable, side, tubeIdx) {
+        const size = cableSize(cable); const width = side === 'left' ? size.leftW : size.rightW; const offsetX = side === 'left' ? 0 : size.leftW + L.TRUNK; const isLeft = side === 'left'; let y = L.TUBE_PAD;
+        for (const visibleIdx of visibleTubes(cable)) {
+          if (visibleIdx === tubeIdx) { const pillX = isLeft ? offsetX + width - L.PILL_W - 2 : offsetX + 2; return { pillX: cable.x + pillX, pillCY: cable.y + y + L.TUBE_H / 2 }; }
+          y += L.TUBE_H; if (sideExpanded(cable, side).includes(visibleIdx)) y += L.STRAND_PAD * 2 + cableTubeStrandCount(cable, visibleIdx) * L.STRAND_STEP;
+        }
+        return null;
+      }
+      function exportDxf() {
+        const entities = [];
+        state.workZones.forEach((zone) => { entities.push(dxfRect('WORK_ZONES', zone.x, zone.y, zone.width, zone.height)); entities.push(dxfText('LABELS', zone.label, zone.x + 14, zone.y + 24, 10)); if (zone.description) entities.push(dxfText('LABELS', zone.description, zone.x + 14, zone.y + 42, 7)); });
+        state.cables.forEach((cable) => {
+          const size = cableSize(cable); const trunkX = cable.x + size.leftW; const trunkY = cable.y; const centerX = trunkX + L.TRUNK / 2;
+          entities.push(dxfRect('CABLE_TRUNKS', trunkX, trunkY, L.TRUNK, size.height));
+          entities.push(dxfText('LABELS', cable.name || 'BUILDING', centerX - 45, trunkY + 31, 12));
+          entities.push(dxfText('LABELS', `${cable.cableName || 'CABLE'} - ${cable.cableSegment || '1'}`, centerX - 65, trunkY + 62, 10));
+          entities.push(dxfText('LABELS', `${cable.fiberCount} CABLE`, centerX - 45, trunkY + size.height - 20, 10));
+          ['left', 'right'].forEach((side) => {
+            visibleTubes(cable).forEach((tubeIdx) => {
+              const info = tubeInfo(cable, tubeIdx); const row = tubeRowGeometry(cable, side, tubeIdx); if (!row) return;
+              entities.push(dxfCurve(`TUBE_${info.base.abb}`, [{ x: row.pillX, y: row.pillCY }, { x: row.pillX + L.PILL_W, y: row.pillCY }], 0.5));
+              const tubeLabel = `TUBE ${String(tubeIdx + 1).padStart(2, '0')} ${info.base.name.toUpperCase()}`;
+              entities.push(dxfText('LABELS', tubeLabel, side === 'left' ? row.pillX - 10 : row.pillX + L.PILL_W + 10, row.pillCY + 2, 5.5));
+              if (sideExpanded(cable, side).includes(tubeIdx)) {
+                for (let strandIdx = 0; strandIdx < info.count; strandIdx += 1) {
+                  const ref = { cableId: cable.id, side, tubeIdx, strandIdx }; const dot = getDotWorld(ref); if (!dot) continue; const start = { x: side === 'left' ? row.pillX : row.pillX + L.PILL_W, y: row.pillCY }; const control1 = { x: (start.x + dot.x) / 2, y: start.y }; const control2 = { x: (start.x + dot.x) / 2, y: dot.y }; const strand = strandInfo(cable, tubeIdx, strandIdx); entities.push(dxfCurve(`FIBER_${strand.color.abb}`, cubicPoints(start, control1, control2, dot))); entities.push(dxfCircle(`FIBER_${strand.color.abb}`, dot.x, dot.y, 3)); entities.push(dxfText('LABELS', strand.label, dot.x + (side === 'left' ? -12 : 12), dot.y + 2, 5));
+                }
+              }
+            });
+          });
+        });
+        state.equipment.forEach((equipment) => { const size = equipmentSize(equipment); const width = size.width; const height = size.height; entities.push(dxfRect('END_POINTS', equipment.x, equipment.y, width, height)); entities.push(dxfText('LABELS', equipment.name || 'END-POINT', equipment.x + 12, equipment.y + 22, 10)); entities.push(dxfText('LABELS', `${equipment.building || 'NO BUILDING'} · ${equipmentTotalPorts(equipment)} PORTS`, equipment.x + 12, equipment.y + 38, 6)); const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right']; sides.forEach((side) => { for (let index = 0; index < equipment.ports; index += 1) { const ref = { equipmentId: equipment.id, side, tubeIdx: 0, strandIdx: index }; const point = getDotWorld(ref); if (!point) continue; entities.push(dxfCircle('END_POINTS', point.x, point.y, 4)); entities.push(dxfText('LABELS', equipment.portLabels?.[index] || `P-${index + 1}`, point.x + (side === 'left' ? 10 : -10), point.y + 2, 5)); } }); });
+        state.connections.forEach((connection) => { const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return; const control1 = { x: (a.x + b.x) / 2, y: a.y }; const control2 = { x: (a.x + b.x) / 2, y: b.y }; entities.push(dxfCurve(connection.type === 'patch' ? 'PATCH_CABLES' : 'SPLICES', cubicPoints(a, control1, control2, b))); if (connection.circuitName) entities.push(dxfText('LABELS', connection.circuitName, (a.x + b.x) / 2, (a.y + b.y) / 2 - 5, 6)); });
+        const dxf = `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n${dxfLayerTable()}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${entities.join('')}0\nENDSEC\n0\nEOF\n`;
+        const blob = new Blob([dxf], { type: 'application/dxf' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${(state.projectName || 'fiber-splice-project').replace(/[^a-z0-9_-]+/gi, '_')}.dxf`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); saveStateLabel('DXF exported'); showToast('DXF file exported.');
+      }
+      function exportJpeg() {
+        const bounds = getBounds() || { minX: -400, maxX: 400, minY: -300, maxY: 300 };
+        const padding = 90;
+        const viewX = bounds.minX - padding;
+        const viewY = bounds.minY - padding;
+        const viewWidth = Math.max(500, bounds.maxX - bounds.minX + padding * 2);
+        const viewHeight = Math.max(350, bounds.maxY - bounds.minY + padding * 2);
+        const exportScale = Math.min(4.5, 7000 / Math.max(viewWidth, viewHeight));
+        const exportWidth = Math.ceil(viewWidth * exportScale);
+        const exportHeight = Math.ceil(viewHeight * exportScale);
+        const clone = svg.cloneNode(true);
+        clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        clone.setAttribute('width', String(exportWidth));
+        clone.setAttribute('height', String(exportHeight));
+        clone.setAttribute('viewBox', `${viewX} ${viewY} ${viewWidth} ${viewHeight}`);
+        const clonedWorld = clone.querySelector('#world');
+        if (clonedWorld) clonedWorld.setAttribute('transform', 'translate(0 0) scale(1)');
+        clone.querySelectorAll('.connection-hit, .strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .tube-row-hit').forEach((element) => element.remove());
+        clone.querySelectorAll('.legend-resize-handle, .workzone-resize-handle, .equipment-resize-handle').forEach((element) => element.remove());
+        clone.querySelector('#previewLayer')?.replaceChildren();
+        const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        background.setAttribute('x', String(viewX)); background.setAttribute('y', String(viewY)); background.setAttribute('width', String(viewWidth)); background.setAttribute('height', String(viewHeight)); background.setAttribute('fill', '#ffffff');
+        clone.insertBefore(background, clone.firstChild);
+        const exportTitle = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        exportTitle.setAttribute('x', String(viewX + viewWidth / 2)); exportTitle.setAttribute('y', String(viewY + 30)); exportTitle.setAttribute('text-anchor', 'middle'); exportTitle.setAttribute('fill', '#111827'); exportTitle.setAttribute('font-family', 'Arial, sans-serif'); exportTitle.setAttribute('font-size', '16'); exportTitle.setAttribute('font-weight', '700'); exportTitle.setAttribute('letter-spacing', '1.5'); exportTitle.textContent = state.projectName || 'Untitled Project';
+        clone.appendChild(exportTitle);
+        const printStyle = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+        printStyle.textContent = `.cable-trunk{fill:#f2f3f4!important;stroke:#111827!important;stroke-width:3px!important;filter:none!important}.trunk-lines{opacity:.08!important}.trunk-location{fill:#111827!important;font:16px Arial,sans-serif;letter-spacing:.18em;text-anchor:middle}.trunk-name{fill:#111827!important;font:700 18px Arial,sans-serif;text-anchor:middle}.trunk-cable-display{fill:#111827!important;font:700 16px Arial,sans-serif;text-anchor:middle}.trunk-meta{fill:#334155!important;font:700 18px Arial,sans-serif;letter-spacing:.08em;text-anchor:middle}.trunk-end-box{fill:#ffffff!important;stroke:#374151!important;stroke-width:1.2px}.trunk-end-caption{fill:#334155!important;font:700 7px Arial,sans-serif;letter-spacing:.16em;text-anchor:middle}.trunk-end-value{fill:#111827!important;font:700 9px Arial,sans-serif;text-anchor:middle}.tube-label{fill:#111827!important;font:8px monospace}.strand-label{fill:#111827!important;font:7px monospace}.port-label{fill:#111827!important;font:8px monospace}.node-title{fill:#111827!important;font:700 12px Arial,sans-serif}.node-subtitle{fill:#334155!important;font:8px Arial,sans-serif}.node-card{fill:#ffffff!important;stroke:#374151!important;stroke-width:2px;filter:none!important}.node-port{fill:#ffffff!important;stroke:#374151!important}.workzone{fill:#ffffff!important;stroke:#4b5563!important;stroke-dasharray:7 5}.workzone-title{fill:#111827!important;font:700 12px Arial,sans-serif}.workzone-description{fill:#334155!important;font:9px Arial,sans-serif}.connection-line{fill:none;stroke:#334155!important;stroke-width:1.5px;stroke-opacity:1!important;filter:none!important}.connection-line.selected{stroke:#111827!important;filter:none!important}.connection-hit,.strand-hit,.strand-line-hit,.strand-area-hit,.equipment-port-hit,.tube-row-hit{display:none!important}.fan-line{fill:none;stroke-opacity:.85!important}.strand-dot{stroke:#111827!important;filter:none!important}.tube-pill{stroke:#111827!important}.canvas-help,.canvas-mode{display:none!important}`;
+        printStyle.appendChild(document.createTextNode('.connection-line.patch{stroke:#d55b00!important;stroke-dasharray:8 4}'));
+        printStyle.appendChild(document.createTextNode('.node-card{fill:#dff3ff!important;stroke:#168fc4!important;stroke-width:2px!important}.legend-card{fill:#eef9ff!important;stroke:#168fc4!important;stroke-width:2px!important}.legend-header{fill:#d9f1ff!important}.legend-title{fill:#111827!important;font:700 12px Arial,sans-serif}.legend-row-label{fill:#111827!important;font:9px monospace}.legend-swatch{stroke:#374151!important}.legend-resize-handle{display:none!important}'));
+        clone.insertBefore(printStyle, clone.firstChild);
+        const svgBlob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml;charset=utf-8' });
+        const svgUrl = URL.createObjectURL(svgBlob);
+        const image = new Image();
+        image.onload = () => {
+          const exportCanvas = document.createElement('canvas');
+          exportCanvas.width = exportWidth; exportCanvas.height = exportHeight;
+          const context = exportCanvas.getContext('2d');
+          context.fillStyle = '#ffffff'; context.fillRect(0, 0, exportWidth, exportHeight);
+          context.drawImage(image, 0, 0, exportWidth, exportHeight);
+          URL.revokeObjectURL(svgUrl);
+          exportCanvas.toBlob((blob) => {
+            if (!blob) { showToast('JPEG export failed.', 'error'); return; }
+            const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${(state.projectName || 'fiber-splice-project').replace(/[^a-z0-9_-]+/gi, '_')}.jpg`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); saveStateLabel('High-resolution JPEG exported'); showToast('High-resolution printer-friendly JPEG exported.');
+          }, 'image/jpeg', .96);
+        };
+        image.onerror = () => { URL.revokeObjectURL(svgUrl); showToast('JPEG export failed.', 'error'); };
+        image.src = svgUrl;
+      }
+
+      function normalize(raw) {
+        if (!raw || typeof raw !== 'object') throw new Error('Invalid diagram data.');
+        const next = blankState(String(raw.projectName || raw.name || 'Untitled Project'));
+        next.viewport = { x: num(raw.viewport?.x), y: num(raw.viewport?.y), zoom: clamp(num(raw.viewport?.zoom, 1), .12, 3.5) };
+        if (Array.isArray(raw.equipment)) next.equipment = raw.equipment.map((e) => ({ id: String(e.id || id('equipment')), kind: e.kind === 'equipment' || e.type === 'equipment' ? 'equipment' : 'endpoint', name: String(e.name || (e.kind === 'equipment' ? 'EQUIPMENT' : 'END-POINT')), building: String(e.building || ''), ports: clamp(Math.round(num(e.ports, 8)), 1, 64), portLabels: Array.isArray(e.portLabels) ? e.portLabels.map(String) : [], x: num(e.x), y: num(e.y), width: num(e.width, 230), height: num(e.height, 54 + clamp(Math.round(num(e.ports, 8)), 1, 64) * 26 + 16), side: e.side === 'both' ? 'both' : e.side === 'left' ? 'left' : 'right' }));
+        if (Array.isArray(raw.cables) && raw.cables.some((c) => c.fiberCount !== undefined || c.leftExp !== undefined)) next.cables = raw.cables.map((c) => ({ id: String(c.id || id('cable')), name: String(c.name || c.buildingName || 'BUILDING'), cableName: String(c.cableName || c.location || c.legName || 'CABLE'), cableSegment: String(c.cableSegment ?? c.segment ?? c.segmentNumber ?? '1'), to: String(c.to || ''), from: String(c.from || ''), fiberCount: clamp(Math.round(num(c.fiberCount ?? c.strandCount, 48)), 1, 5000), x: num(c.x), y: num(c.y), leftExp: Array.isArray(c.leftExp) ? c.leftExp.map(Number) : [], rightExp: Array.isArray(c.rightExp) ? c.rightExp.map(Number) : [], isCollapsed: Boolean(c.isCollapsed), fromLabelOffset: { x: num(c.fromLabelOffset?.x), y: num(c.fromLabelOffset?.y) }, toLabelOffset: { x: num(c.toLabelOffset?.x), y: num(c.toLabelOffset?.y) } }));
+        else if (Array.isArray(raw.nodes) && Array.isArray(raw.cables)) {
+          next.equipment = raw.nodes.map((n, i) => ({ id: String(n.id || id('equipment')), kind: 'endpoint', name: String(n.name || `END-POINT-${i + 1}`), building: '', ports: 8, portLabels: [], x: num(n.x), y: num(n.y), side: i % 2 ? 'right' : 'left' }));
+          next.cables = raw.cables.map((c, i) => { const from = next.equipment.find((e) => e.id === c.startNodeId); const to = next.equipment.find((e) => e.id === c.endNodeId); return { id: String(c.id || id('cable')), name: 'BUILDING', cableName: String(c.legName || 'CABLE'), cableSegment: String(c.segmentNumber || i + 1), to: to?.name || '', from: from?.name || '', fiberCount: clamp(Math.round(num(c.strandCount, 48)), 1, 5000), x: (from && to) ? (from.x + to.x) / 2 - 95 : i * 360, y: (from && to) ? (from.y + to.y) / 2 - 240 : i * 40, leftExp: c.expanded ? [0] : [], rightExp: c.expanded ? [0] : [], isCollapsed: false, fromLabelOffset: { x: 0, y: 0 }, toLabelOffset: { x: 0, y: 0 } }; });
+        }
+        next.connections = Array.isArray(raw.connections) ? raw.connections.map((c) => ({ id: String(c.id || id('conn')), from: c.from, to: c.to, circuitName: String(c.circuitName || ''), type: c.type === 'patch' ? 'patch' : 'splice' })) : [];
+        next.workZones = Array.isArray(raw.workZones) ? raw.workZones.map((z) => ({ id: String(z.id || id('zone')), x: num(z.x), y: num(z.y), width: clamp(num(z.width, 320), 60, 2000), height: clamp(num(z.height, 180), 60, 2000), label: String(z.label || 'WORK ZONE'), description: String(z.description || '') })) : [];
+        next.legends = Array.isArray(raw.legends) ? raw.legends.map((legend) => ({ id: String(legend.id || id('legend')), x: num(legend.x), y: num(legend.y), width: clamp(num(legend.width, 230), 180, 900), height: clamp(num(legend.height, 220), 180, 1200), title: String(!legend.title || legend.title === 'FIBER COLOR LEGEND' ? 'DIAGRAM LEGEND' : legend.title) })) : [];
+        return next;
+      }
+
+      $('#projectName').addEventListener('input', (event) => { state.projectName = event.target.value; updateCanvasProjectTitle(); autosave(); });
+      $('#newProjectBtn').addEventListener('click', () => { const name = window.prompt('New project name', 'Untitled Project'); if (name !== null) createProject(name.trim() || 'Untitled Project'); });
+      $('#projectsBtn').addEventListener('click', openProjects);
+      $('#exportBtn').addEventListener('click', exportDxf);
+      $('#jpegBtn').addEventListener('click', exportJpeg);
+      $('#fitBtn').addEventListener('click', fitView); $('#centerBtn').addEventListener('click', fitView);
+      $('#zoomInBtn').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, state.viewport.zoom * 1.15); }); $('#zoomOutBtn').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, state.viewport.zoom / 1.15); }); $('#deleteBtn').addEventListener('click', deleteSelected); $('#undoBtn').addEventListener('click', undo);
+      document.querySelectorAll('[data-tool]').forEach((button) => button.addEventListener('click', () => setTool(button.dataset.tool)));
+      $('#closeProjectsBtn').addEventListener('click', () => $('#projectsModal').classList.remove('open')); $('#closeProjectsBtn2').addEventListener('click', () => $('#projectsModal').classList.remove('open')); $('#newProjectFromModal').addEventListener('click', () => { $('#projectsModal').classList.remove('open'); $('#newProjectBtn').click(); }); $('#projectsModal').addEventListener('click', (event) => { if (event.target === $('#projectsModal')) $('#projectsModal').classList.remove('open'); });
+      svg.addEventListener('pointerdown', onCanvasPointerDown); svg.addEventListener('pointermove', onPointerMove); svg.addEventListener('pointerup', onPointerUp); svg.addEventListener('pointercancel', onPointerUp); svg.addEventListener('wheel', onWheel, { passive: false }); svg.addEventListener('contextmenu', (event) => event.preventDefault());
+      window.addEventListener('pointerup', onPointerUp); window.addEventListener('resize', updateTransform); window.addEventListener('keydown', (event) => { const typing = ['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement?.tagName); if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !typing) { event.preventDefault(); undo(); return; } if ((event.key === 'Delete' || event.key === 'Backspace') && !typing) deleteSelected(); if (event.key === 'Escape') { strandDrag = null; labelDrag = null; boxSelect = null; panDrag = null; resize = null; setTool('select'); render(); } });
+
+      loadStartup(); render();
+    })();
+  </script>
+</body>
+</html>
