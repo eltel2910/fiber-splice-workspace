@@ -547,8 +547,14 @@
         return graph;
       }
       function circuitNeighbors(ref, graph) {
-        const neighbors = [...(graph.get(dotKey(ref)) || [])];
-        if (ref?.cableId) neighbors.push({ ...ref, side: ref.side === 'left' ? 'right' : 'left' });
+        const explicitNeighbors = [...(graph.get(dotKey(ref)) || [])];
+        const hasEquipmentBoundary = explicitNeighbors.some((neighbor) => neighbor.equipmentId);
+        const neighbors = hasEquipmentBoundary ? explicitNeighbors.filter((neighbor) => neighbor.equipmentId) : explicitNeighbors;
+        if (ref?.cableId) {
+          const opposite = { ...ref, side: ref.side === 'left' ? 'right' : 'left' };
+          const oppositeHasEquipmentBoundary = (graph.get(dotKey(opposite)) || []).some((neighbor) => neighbor.equipmentId);
+          if (!hasEquipmentBoundary && !oppositeHasEquipmentBoundary) neighbors.push(opposite);
+        }
         if (ref?.vertexId) { const vertex = vertexById(ref.vertexId); vertexPorts(vertex).forEach((port) => { if (port !== ref.port) neighbors.push({ vertexId: ref.vertexId, port }); }); }
         return neighbors;
       }
