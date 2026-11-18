@@ -135,6 +135,8 @@
     .connection-line.selected { stroke: var(--accent); stroke-width: 2.5; stroke-opacity: 1; filter: drop-shadow(0 0 5px rgba(163,230,53,.7)); }
     .connection-hit { fill: none; stroke: transparent; stroke-width: 13; pointer-events: stroke; cursor: pointer; }
     .circuit-label { fill: #d7edf5; font-size: 7px; font-family: ui-monospace, monospace; font-weight: 700; pointer-events: none; paint-order: stroke; stroke: rgba(9,17,24,.82); stroke-width: 2px; stroke-linejoin: round; }
+    .direction-arrow { fill: #f7d54a; stroke: #172433; stroke-width: 1.2; filter: drop-shadow(0 0 4px rgba(247,213,74,.7)); pointer-events: none; }
+    .direction-arrow.selected { fill: var(--accent); }
     .route-vertex { fill: #172433; stroke: #f7d54a; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(247,213,74,.55)); cursor: move; }
     .route-vertex.selected { stroke: var(--accent); filter: drop-shadow(0 0 8px rgba(163,230,53,.72)); }
     .route-vertex-label { fill: #f7d54a; font-size: 8px; font-weight: 700; text-anchor: middle; pointer-events: none; }
@@ -540,6 +542,42 @@
         if (!fromDirection && !toDirection) return `M ${a.x} ${a.y} C ${(a.x + b.x) / 2} ${a.y}, ${(a.x + b.x) / 2} ${b.y}, ${b.x} ${b.y}`;
         return pointsPath(orthogonalRoutePoints(a, b, fromDirection, toDirection));
       }
+      function connectionTouchesVertex(connection) { return !!(connection?.from?.vertexId || connection?.to?.vertexId); }
+      function directedConnection(connection, a, b) {
+        if (connection.direction !== 'reverse') return { connection, a, b };
+        return { connection: { ...connection, from: connection.to, to: connection.from }, a: b, b: a };
+      }
+      function directedConnectionPath(connection, a, b) {
+        const directed = directedConnection(connection, a, b);
+        return connectionPath(directed.connection, directed.a, directed.b);
+      }
+      function routePointAtFraction(points, fraction = .5) {
+        if (!points?.length) return null;
+        if (points.length === 1) return { x: points[0].x, y: points[0].y, angle: 0 };
+        const lengths = []; let total = 0;
+        for (let index = 1; index < points.length; index += 1) { const length = Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y); lengths.push(length); total += length; }
+        if (!total) return { x: points[0].x, y: points[0].y, angle: 0 };
+        let distance = total * clamp(fraction, 0, 1);
+        for (let index = 1; index < points.length; index += 1) {
+          const length = lengths[index - 1]; if (distance > length && index < points.length - 1) { distance -= length; continue; }
+          const start = points[index - 1]; const end = points[index]; const ratio = length ? distance / length : 0;
+          return { x: start.x + (end.x - start.x) * ratio, y: start.y + (end.y - start.y) * ratio, angle: Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI };
+        }
+        const start = points[points.length - 2]; const end = points[points.length - 1]; return { x: end.x, y: end.y, angle: Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI };
+      }
+      function directionArrowPlacement(connection, a, b) {
+        if (!connectionTouchesVertex(connection)) return null;
+        const directed = directedConnection(connection, a, b);
+        const fromDirection = directed.connection.from?.vertexId ? directed.connection.from.port : null;
+        const toDirection = directed.connection.to?.vertexId ? directed.connection.to.port : null;
+        const points = fromDirection || toDirection ? orthogonalRoutePoints(directed.a, directed.b, fromDirection, toDirection) : [directed.a, directed.b];
+        return routePointAtFraction(points, .5);
+      }
+      function renderDirectionArrow(connection, a, b) {
+        const placement = directionArrowPlacement(connection, a, b); if (!placement) return null;
+        const arrow = svgEl('polygon', { points: '0,-6 13,0 0,6', class: `direction-arrow${selected?.type === 'connection' && selected.id === connection.id ? ' selected' : ''}`, transform: `translate(${placement.x} ${placement.y}) rotate(${placement.angle})` });
+        return arrow;
+      }
       function buildCircuitGraph() {
         const graph = new Map();
         const add = (from, to) => { const fromKey = dotKey(from); const toKey = dotKey(to); if (!graph.has(fromKey)) graph.set(fromKey, []); if (!graph.has(toKey)) graph.set(toKey, []); graph.get(fromKey).push({ ...to }); graph.get(toKey).push({ ...from }); };
@@ -749,14 +787,16 @@
         state.connections.forEach((connection) => {
           const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return;
           const path = connectionPath(connection, a, b);
+          const directedPath = directedConnectionPath(connection, a, b);
           const hit = svgEl('path', { d: path, class: 'connection-hit' });
           const colored = connection.type !== 'patch'; const gradientId = `connection-gradient-${String(connection.id).replace(/[^a-z0-9_-]/gi, '-')}`;
           if (colored && defs) { const gradient = svgEl('linearGradient', { id: gradientId, x1: 0, y1: 0, x2: 1, y2: 0, 'data-connection-gradient': 'true' }); gradient.append(svgEl('stop', { offset: 0, 'stop-color': connectorColor(connection.from) }), svgEl('stop', { offset: 1, 'stop-color': connectorColor(connection.to) })); defs.append(gradient); }
-          const line = svgEl('path', { d: path, class: `connection-line${colored ? ' colored' : ' patch'}${selected?.type === 'connection' && selected.id === connection.id ? ' selected' : ''}` });
+          const line = svgEl('path', { d: directedPath, class: `connection-line${colored ? ' colored' : ' patch'}${selected?.type === 'connection' && selected.id === connection.id ? ' selected' : ''}` });
           if (colored && defs) line.setAttribute('style', `stroke: url(#${gradientId}) !important`);
           const selectConnection = (event) => { event.stopPropagation(); select('connection', connection.id); };
           [hit, line].forEach((el) => { el.addEventListener('pointerdown', selectConnection); el.addEventListener('click', selectConnection); });
-          layer.append(hit, line);
+          const arrow = renderDirectionArrow(connection, a, b);
+          layer.append(hit, line); if (arrow) layer.append(arrow);
           const circuitName = circuitNameForConnection(connection, circuitGraph);
           if (circuitName) { const labelPoint = circuitLabelPosition(connection, a, b); const label = svgEl('text', { x: labelPoint.x, y: labelPoint.y, class: 'circuit-label', 'text-anchor': labelPoint.anchor }); label.textContent = circuitName; layer.append(label); }
         });
@@ -1000,7 +1040,7 @@
           reserve(source); reserve(target);
         }
         recordHistory();
-        sources.forEach((source, index) => state.connections.push({ id: id('conn'), from: source, to: targets[index], circuitName: '', type: isPatch ? 'patch' : 'splice' }));
+        sources.forEach((source, index) => state.connections.push({ id: id('conn'), from: source, to: targets[index], circuitName: '', type: isPatch ? 'patch' : 'splice', direction: 'forward' }));
         clearDotSelection(); selected = null; autosave(); render(); showToast(sources.length > 1 ? `${sources.length} strand connections created.` : (isPatch ? 'Patch cable connection created.' : 'Splice connection created.'));
       }
 
@@ -1078,7 +1118,20 @@
         if (!legend) return; $('#inspectorContent').innerHTML = `<h2>Legend</h2><p class="sub">Drag the legend by its body. Use the lower-right handle to adjust its size.</p><div class="field"><label>Title</label><input id="legendTitle" value="${esc(legend.title)}"></div><div class="field-row"><div class="field"><label>Width</label><input id="legendWidth" type="number" min="180" max="900" value="${legend.width}"></div><div class="field"><label>Height</label><input id="legendHeight" type="number" min="180" max="1200" value="${legend.height}"></div></div><div class="section"><button class="button danger" id="deleteSelected">Delete legend</button></div>`; $('#legendTitle').addEventListener('input', (e) => updateItem('legend', legend.id, 'title', e.target.value)); $('#legendWidth').addEventListener('change', (e) => updateItem('legend', legend.id, 'width', e.target.value)); $('#legendHeight').addEventListener('change', (e) => updateItem('legend', legend.id, 'height', e.target.value)); $('#deleteSelected').addEventListener('click', deleteSelected);
       }
 
-      function renderConnectionInspector(connection) { if (!connection) return; const isPatch = connection.type === 'patch'; const title = isPatch ? 'Patch cable' : 'Splice connection'; const description = isPatch ? 'This patch cable links an End Point or Equipment port to an OSP fiber strand.' : 'Circuit names come from the leftmost equipment port label in the connected path.'; const nameLabel = isPatch ? 'Patch cable name' : 'Manual fallback name'; const circuitName = circuitNameForConnection(connection); $('#inspectorContent').innerHTML = `<h2>${title}</h2><p class="sub">${description}</p><div class="field"><label>${nameLabel}</label><input id="connectionName" value="${esc(connection.circuitName || '')}" placeholder="Used when no equipment label is available"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Circuit name</div><div class="v">${esc(circuitName || '—')}</div></div><div class="meta-card"><div class="k">From</div><div class="v">${esc(dotKey(connection.from))}</div></div><div class="meta-card"><div class="k">To</div><div class="v">${esc(dotKey(connection.to))}</div></div></div></div><div class="section"><button class="button danger" id="disconnectSelected">Disconnect</button></div>`; $('#connectionName').addEventListener('input', (e) => { connection.circuitName = e.target.value; autosave(); renderConnections(); }); $('#disconnectSelected').addEventListener('click', disconnectSelected); }
+      function toggleConnectionDirection() {
+        if (selected?.type !== 'connection') return;
+        const connection = state.connections.find((item) => item.id === selected.id); if (!connection || !connectionTouchesVertex(connection)) return;
+        recordHistory(); connection.direction = connection.direction === 'reverse' ? 'forward' : 'reverse'; autosave(); render(); showToast(`Vertex arrow direction switched ${connection.direction === 'reverse' ? 'to reverse' : 'to forward'}.`);
+      }
+      function renderConnectionInspector(connection) {
+        if (!connection) return;
+        const isPatch = connection.type === 'patch'; const directional = connectionTouchesVertex(connection); const title = isPatch ? 'Patch cable' : 'Splice connection'; const description = isPatch ? 'This patch cable links an End Point or Equipment port to an OSP fiber strand.' : 'Circuit names come from the leftmost equipment port label in the connected path.'; const nameLabel = isPatch ? 'Patch cable name' : 'Manual fallback name'; const circuitName = circuitNameForConnection(connection); const direction = connection.direction === 'reverse' ? 'Reverse (To → From)' : 'Forward (From → To)';
+        const directionSection = directional ? `<div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Arrow direction</div><div class="v">${direction}</div></div></div><button class="button" id="toggleConnectionDirection">Switch arrow direction</button></div>` : '';
+        $('#inspectorContent').innerHTML = `<h2>${title}</h2><p class="sub">${description}</p><div class="field"><label>${nameLabel}</label><input id="connectionName" value="${esc(connection.circuitName || '')}" placeholder="Used when no equipment label is available"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Circuit name</div><div class="v">${esc(circuitName || '—')}</div></div><div class="meta-card"><div class="k">From</div><div class="v">${esc(dotKey(connection.from))}</div></div><div class="meta-card"><div class="k">To</div><div class="v">${esc(dotKey(connection.to))}</div></div></div></div>${directionSection}<div class="section"><button class="button danger" id="disconnectSelected">Disconnect</button></div>`;
+        $('#connectionName').addEventListener('input', (e) => { connection.circuitName = e.target.value; autosave(); renderConnections(); });
+        if (directional) $('#toggleConnectionDirection').addEventListener('click', toggleConnectionDirection);
+        $('#disconnectSelected').addEventListener('click', disconnectSelected);
+      }
 
       function disconnectSelected() { if (selected?.type === 'connection') { const before = state.connections.length; const next = state.connections.filter((c) => c.id !== selected.id); if (next.length === before) { showToast('Connection no longer exists.', 'error'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast('Connection disconnected.'); return; } if (!selected?.ref) return; const refs = selectedDots.length ? selectedDots : [selected.ref]; const before = state.connections.length; const next = state.connections.filter((c) => !refs.some((ref) => refsEqual(c.from, ref) || refsEqual(c.to, ref))); if (next.length === before) { showToast('Selected strand(s) are not connected.'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast(refs.length > 1 ? `${refs.length} connections disconnected.` : 'Connection disconnected.'); }
       function deleteSelected() { if (!selected) return; recordHistory(); if (selected.type === 'cable') { state.connections = state.connections.filter((c) => c.from.cableId !== selected.id && c.to.cableId !== selected.id); state.cables = state.cables.filter((c) => c.id !== selected.id); } else if (selected.type === 'equipment') { state.connections = state.connections.filter((c) => c.from.equipmentId !== selected.id && c.to.equipmentId !== selected.id); state.equipment = state.equipment.filter((e) => e.id !== selected.id); } else if (selected.type === 'vertex') { state.connections = state.connections.filter((c) => c.from.vertexId !== selected.id && c.to.vertexId !== selected.id); state.vertices = state.vertices.filter((vertex) => vertex.id !== selected.id); } else if (selected.type === 'workzone') state.workZones = state.workZones.filter((z) => z.id !== selected.id); else if (selected.type === 'legend') state.legends = state.legends.filter((legend) => legend.id !== selected.id); else if (selected.type === 'connection') state.connections = state.connections.filter((c) => c.id !== selected.id); else if (selected.type === 'dot') { disconnectSelected(); return; } selected = null; clearDotSelection(); autosave(); render(); }
@@ -1119,10 +1172,11 @@
       function dxfRect(layer, x, y, width, height) { return dxfLine(layer, x, y, x + width, y) + dxfLine(layer, x + width, y, x + width, y + height) + dxfLine(layer, x + width, y + height, x, y + height) + dxfLine(layer, x, y + height, x, y); }
       function cubicPoints(a, c1, c2, b, segments = 18) { const points = []; for (let i = 0; i <= segments; i += 1) { const t = i / segments; const mt = 1 - t; points.push({ x: mt * mt * mt * a.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * b.x, y: mt * mt * mt * a.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * b.y }); } return points; }
       function dxfCurve(layer, points, lineWidth = 0.25) { if (!points || points.length < 2) return ''; const vertices = points.map((point) => `0\nVERTEX\n8\n${layer}\n10\n${dxfNumber(point.x)}\n20\n${dxfNumber(-point.y)}\n30\n0.0\n70\n0\n`).join(''); return `0\nPOLYLINE\n8\n${layer}\n66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n40\n${dxfNumber(lineWidth)}\n41\n${dxfNumber(lineWidth)}\n70\n0\n${vertices}0\nSEQEND\n8\n${layer}\n`; }
+      function directionArrowDxfPoints(placement, size = 8) { const angle = num(placement?.angle) * Math.PI / 180; const ux = Math.cos(angle); const uy = Math.sin(angle); const vx = -uy; const vy = ux; const tip = { x: placement.x + ux * size, y: placement.y + uy * size }; const base = { x: placement.x - ux * size * .45, y: placement.y - uy * size * .45 }; const wing = size * .55; return [{ x: base.x + vx * wing, y: base.y + vy * wing }, tip, { x: base.x - vx * wing, y: base.y - vy * wing }, { x: base.x + vx * wing, y: base.y + vy * wing }]; }
       function connectionDxfPoints(connection, a, b) { const fromDirection = connection.from?.vertexId ? connection.from.port : null; const toDirection = connection.to?.vertexId ? connection.to.port : null; return fromDirection || toDirection ? orthogonalRoutePoints(a, b, fromDirection, toDirection) : cubicPoints(a, { x: (a.x + b.x) / 2, y: a.y }, { x: (a.x + b.x) / 2, y: b.y }, b); }
       function dxfLayerTable() {
         const layers = [
-          ['0', 7], ['CABLE_TRUNKS', 8], ['END_POINTS', 4], ['ROUTING_VERTICES', 2], ['WORK_ZONES', 3], ['SPLICES', 2], ['PATCH_CABLES', 30], ['LABELS', 7],
+          ['0', 7], ['CABLE_TRUNKS', 8], ['END_POINTS', 4], ['ROUTING_VERTICES', 2], ['DIRECTION_ARROWS', 2], ['WORK_ZONES', 3], ['SPLICES', 2], ['PATCH_CABLES', 30], ['LABELS', 7],
           ...COLORS.map((color) => [`TUBE_${color.abb}`, dxfAci(color.abb)]),
           ...COLORS.map((color) => [`FIBER_${color.abb}`, dxfAci(color.abb)])
         ];
@@ -1163,7 +1217,7 @@
         });
         state.equipment.forEach((equipment) => { const size = equipmentSize(equipment); const width = size.width; const height = size.height; entities.push(dxfRect('END_POINTS', equipment.x, equipment.y, width, height)); entities.push(dxfText('LABELS', equipment.name || 'END-POINT', equipment.x + 12, equipment.y + 22, 10)); entities.push(dxfText('LABELS', `${equipment.building || 'NO BUILDING'} · ${equipmentTotalPorts(equipment)} PORTS`, equipment.x + 12, equipment.y + 38, 6)); const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right']; sides.forEach((side) => { for (let index = 0; index < equipment.ports; index += 1) { const ref = { equipmentId: equipment.id, side, tubeIdx: 0, strandIdx: index }; const point = getDotWorld(ref); if (!point) continue; entities.push(dxfCircle('END_POINTS', point.x, point.y, 4)); entities.push(dxfText('LABELS', equipmentPortLabel(equipment, side, index), point.x + (side === 'left' ? 10 : -10), point.y + 2, 5)); } }); });
          state.vertices.forEach((vertex) => { const size = clamp(num(vertex.size, VERTEX_SIZE), 14, 80); entities.push(dxfRect('ROUTING_VERTICES', vertex.x - size / 2, vertex.y - size / 2, size, size)); entities.push(dxfText('LABELS', vertex.label || '90 DEG BEND', vertex.x - 18, vertex.y + 3, 5)); });
-          const circuitGraph = buildCircuitGraph(); state.connections.forEach((connection) => { const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return; entities.push(dxfCurve(connection.type === 'patch' ? 'PATCH_CABLES' : 'SPLICES', connectionDxfPoints(connection, a, b))); const circuitName = circuitNameForConnection(connection, circuitGraph); if (circuitName) { const labelPoint = circuitLabelPosition(connection, a, b); entities.push(dxfText('LABELS', circuitName, labelPoint.x, labelPoint.y, 6)); } });
+          const circuitGraph = buildCircuitGraph(); state.connections.forEach((connection) => { const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return; entities.push(dxfCurve(connection.type === 'patch' ? 'PATCH_CABLES' : 'SPLICES', connectionDxfPoints(connection, a, b))); const arrowPlacement = directionArrowPlacement(connection, a, b); if (arrowPlacement) entities.push(dxfCurve('DIRECTION_ARROWS', directionArrowDxfPoints(arrowPlacement), 0.8)); const circuitName = circuitNameForConnection(connection, circuitGraph); if (circuitName) { const labelPoint = circuitLabelPosition(connection, a, b); entities.push(dxfText('LABELS', circuitName, labelPoint.x, labelPoint.y, 6)); } });
         const dxf = `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n${dxfLayerTable()}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${entities.join('')}0\nENDSEC\n0\nEOF\n`;
         const blob = new Blob([dxf], { type: 'application/dxf' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${(state.projectName || 'fiber-splice-project').replace(/[^a-z0-9_-]+/gi, '_')}.dxf`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); saveStateLabel('DXF exported'); showToast('DXF file exported.');
       }
@@ -1197,7 +1251,7 @@
         printStyle.textContent = `.cable-trunk{fill:#f2f3f4!important;stroke:#111827!important;stroke-width:3px!important;filter:none!important}.trunk-lines{opacity:.08!important}.trunk-location{fill:#111827!important;font:16px Arial,sans-serif;letter-spacing:.18em;text-anchor:middle}.trunk-name{fill:#111827!important;font:700 18px Arial,sans-serif;text-anchor:middle}.trunk-cable-display{fill:#111827!important;font:700 16px Arial,sans-serif;text-anchor:middle}.trunk-meta{fill:#334155!important;font:700 18px Arial,sans-serif;letter-spacing:.08em;text-anchor:middle}.trunk-end-box{fill:#ffffff!important;stroke:#374151!important;stroke-width:1.2px}.trunk-end-caption{fill:#334155!important;font:700 7px Arial,sans-serif;letter-spacing:.16em;text-anchor:middle}.trunk-end-value{fill:#111827!important;font:700 9px Arial,sans-serif;text-anchor:middle}.tube-label{fill:#111827!important;font:8px monospace}.strand-label{fill:#111827!important;font:7px monospace}.port-label{fill:#111827!important;font:8px monospace}.node-title{fill:#111827!important;font:700 12px Arial,sans-serif}.node-subtitle{fill:#334155!important;font:8px Arial,sans-serif}.node-card{fill:#ffffff!important;stroke:#374151!important;stroke-width:2px;filter:none!important}.node-port{fill:#ffffff!important;stroke:#374151!important}.workzone{fill:#ffffff!important;stroke:#4b5563!important;stroke-dasharray:7 5}.workzone-title{fill:#111827!important;font:700 12px Arial,sans-serif}.workzone-description{fill:#334155!important;font:9px Arial,sans-serif}.connection-line{fill:none;stroke:#334155!important;stroke-width:1.5px;stroke-opacity:1!important;filter:none!important}.connection-line.selected{stroke:#111827!important;filter:none!important}.connection-hit,.strand-hit,.strand-line-hit,.strand-area-hit,.equipment-port-hit,.tube-row-hit{display:none!important}.fan-line{fill:none;stroke-opacity:.85!important}.strand-dot{stroke:#111827!important;filter:none!important}.tube-pill{stroke:#111827!important}.canvas-help,.canvas-mode{display:none!important}`;
         printStyle.appendChild(document.createTextNode('.connection-line.patch{stroke:#d55b00!important;stroke-dasharray:8 4}'));
         printStyle.appendChild(document.createTextNode('.node-card{fill:#dff3ff!important;stroke:#168fc4!important;stroke-width:2px!important}.legend-card{fill:#eef9ff!important;stroke:#168fc4!important;stroke-width:2px!important}.legend-header{fill:#d9f1ff!important}.legend-title{fill:#111827!important;font:700 12px Arial,sans-serif}.legend-row-label{fill:#111827!important;font:9px monospace}.legend-swatch{stroke:#374151!important}.legend-resize-handle{display:none!important}'));
-        printStyle.appendChild(document.createTextNode('.route-vertex{fill:#fff7ed!important;stroke:#b45309!important;stroke-width:2px;filter:none!important}.route-vertex-label{fill:#92400e!important}.route-vertex-port{fill:#b45309!important;stroke:#fff!important}'));
+        printStyle.appendChild(document.createTextNode('.route-vertex{fill:#fff7ed!important;stroke:#b45309!important;stroke-width:2px;filter:none!important}.route-vertex-label{fill:#92400e!important}.route-vertex-port{fill:#b45309!important;stroke:#fff!important}.direction-arrow{fill:#b45309!important;stroke:#fff!important;filter:none!important}'));
         printStyle.appendChild(document.createTextNode('.circuit-label{fill:#111827!important;font:700 7px monospace;paint-order:stroke;stroke:#ffffff;stroke-width:2px;stroke-linejoin:round}'));
         clone.insertBefore(printStyle, clone.firstChild);
         const svgBlob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml;charset=utf-8' });
@@ -1230,7 +1284,7 @@
           next.equipment = raw.nodes.map((n, i) => ({ id: String(n.id || id('equipment')), kind: 'endpoint', name: String(n.name || `END-POINT-${i + 1}`), building: '', ports: 8, portLabels: [], leftPortLabels: [], rightPortLabels: [], x: num(n.x), y: num(n.y), side: i % 2 ? 'right' : 'left' }));
           next.cables = raw.cables.map((c, i) => { const from = next.equipment.find((e) => e.id === c.startNodeId); const to = next.equipment.find((e) => e.id === c.endNodeId); return { id: String(c.id || id('cable')), name: 'BUILDING', cableName: String(c.legName || 'CABLE'), cableSegment: String(c.segmentNumber || i + 1), to: to?.name || '', from: from?.name || '', fiberCount: clamp(Math.round(num(c.strandCount, 48)), 1, 5000), x: (from && to) ? (from.x + to.x) / 2 - 95 : i * 360, y: (from && to) ? (from.y + to.y) / 2 - 240 : i * 40, leftExp: c.expanded ? [0] : [], rightExp: c.expanded ? [0] : [], isCollapsed: false, fromLabelOffset: { x: 0, y: 0 }, toLabelOffset: { x: 0, y: 0 } }; });
         }
-        next.connections = Array.isArray(raw.connections) ? raw.connections.map((c) => ({ id: String(c.id || id('conn')), from: c.from, to: c.to, circuitName: String(c.circuitName || ''), type: c.type === 'patch' ? 'patch' : 'splice' })) : [];
+        next.connections = Array.isArray(raw.connections) ? raw.connections.map((c) => ({ id: String(c.id || id('conn')), from: c.from, to: c.to, circuitName: String(c.circuitName || ''), type: c.type === 'patch' ? 'patch' : 'splice', direction: c.direction === 'reverse' ? 'reverse' : 'forward' })) : [];
         next.workZones = Array.isArray(raw.workZones) ? raw.workZones.map((z) => ({ id: String(z.id || id('zone')), x: num(z.x), y: num(z.y), width: clamp(num(z.width, 320), 60, 2000), height: clamp(num(z.height, 180), 60, 2000), label: String(z.label || 'WORK ZONE'), description: String(z.description || '') })) : [];
         next.legends = Array.isArray(raw.legends) ? raw.legends.map((legend) => ({ id: String(legend.id || id('legend')), x: num(legend.x), y: num(legend.y), width: clamp(num(legend.width, 230), 180, 900), height: clamp(num(legend.height, 220), 180, 1200), title: String(!legend.title || legend.title === 'FIBER COLOR LEGEND' ? 'DIAGRAM LEGEND' : legend.title) })) : [];
         return next;
