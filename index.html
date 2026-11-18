@@ -543,14 +543,6 @@
         return pointsPath(orthogonalRoutePoints(a, b, fromDirection, toDirection));
       }
       function connectionTouchesVertex(connection) { return !!(connection?.from?.vertexId || connection?.to?.vertexId); }
-      function directedConnection(connection, a, b) {
-        if (connection.direction !== 'reverse') return { connection, a, b };
-        return { connection: { ...connection, from: connection.to, to: connection.from }, a: b, b: a };
-      }
-      function directedConnectionPath(connection, a, b) {
-        const directed = directedConnection(connection, a, b);
-        return connectionPath(directed.connection, directed.a, directed.b);
-      }
       function routePointAtFraction(points, fraction = .5) {
         if (!points?.length) return null;
         if (points.length === 1) return { x: points[0].x, y: points[0].y, angle: 0 };
@@ -567,11 +559,11 @@
       }
       function directionArrowPlacement(connection, a, b) {
         if (!connectionTouchesVertex(connection)) return null;
-        const directed = directedConnection(connection, a, b);
-        const fromDirection = directed.connection.from?.vertexId ? directed.connection.from.port : null;
-        const toDirection = directed.connection.to?.vertexId ? directed.connection.to.port : null;
-        const points = fromDirection || toDirection ? orthogonalRoutePoints(directed.a, directed.b, fromDirection, toDirection) : [directed.a, directed.b];
-        return routePointAtFraction(points, .5);
+        const fromDirection = connection.from?.vertexId ? connection.from.port : null;
+        const toDirection = connection.to?.vertexId ? connection.to.port : null;
+        const points = fromDirection || toDirection ? orthogonalRoutePoints(a, b, fromDirection, toDirection) : [a, b];
+        const arrowPoints = connection.direction === 'reverse' ? [...points].reverse() : points;
+        return routePointAtFraction(arrowPoints, .5);
       }
       function renderDirectionArrow(connection, a, b) {
         const placement = directionArrowPlacement(connection, a, b); if (!placement) return null;
@@ -787,11 +779,10 @@
         state.connections.forEach((connection) => {
           const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return;
           const path = connectionPath(connection, a, b);
-          const directedPath = directedConnectionPath(connection, a, b);
           const hit = svgEl('path', { d: path, class: 'connection-hit' });
           const colored = connection.type !== 'patch'; const gradientId = `connection-gradient-${String(connection.id).replace(/[^a-z0-9_-]/gi, '-')}`;
           if (colored && defs) { const gradient = svgEl('linearGradient', { id: gradientId, x1: 0, y1: 0, x2: 1, y2: 0, 'data-connection-gradient': 'true' }); gradient.append(svgEl('stop', { offset: 0, 'stop-color': connectorColor(connection.from) }), svgEl('stop', { offset: 1, 'stop-color': connectorColor(connection.to) })); defs.append(gradient); }
-          const line = svgEl('path', { d: directedPath, class: `connection-line${colored ? ' colored' : ' patch'}${selected?.type === 'connection' && selected.id === connection.id ? ' selected' : ''}` });
+          const line = svgEl('path', { d: path, class: `connection-line${colored ? ' colored' : ' patch'}${selected?.type === 'connection' && selected.id === connection.id ? ' selected' : ''}` });
           if (colored && defs) line.setAttribute('style', `stroke: url(#${gradientId}) !important`);
           const selectConnection = (event) => { event.stopPropagation(); select('connection', connection.id); };
           [hit, line].forEach((el) => { el.addEventListener('pointerdown', selectConnection); el.addEventListener('click', selectConnection); });
