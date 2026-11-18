@@ -134,6 +134,12 @@
     .connection-line.patch { stroke: var(--orange); stroke-dasharray: 8 4; stroke-opacity: .9; }
     .connection-line.selected { stroke: var(--accent); stroke-width: 2.5; stroke-opacity: 1; filter: drop-shadow(0 0 5px rgba(163,230,53,.7)); }
     .connection-hit { fill: none; stroke: transparent; stroke-width: 13; pointer-events: stroke; cursor: pointer; }
+    .route-vertex { fill: #172433; stroke: #f7d54a; stroke-width: 2; filter: drop-shadow(0 0 6px rgba(247,213,74,.55)); cursor: move; }
+    .route-vertex.selected { stroke: var(--accent); filter: drop-shadow(0 0 8px rgba(163,230,53,.72)); }
+    .route-vertex-label { fill: #f7d54a; font-size: 8px; font-weight: 700; text-anchor: middle; pointer-events: none; }
+    .route-vertex-port { fill: #f7d54a; stroke: #172433; stroke-width: 1.4; }
+    .route-vertex-port.hot { fill: var(--accent-2); stroke: #fff; stroke-width: 2; }
+    .vertex-port-hit { fill: transparent; cursor: crosshair; }
     .canvas-project-title { position: absolute; top: 13px; left: 50%; z-index: 4; transform: translateX(-50%); max-width: min(70%, 620px); overflow: hidden; color: #e8f6ff; font-size: 14px; font-weight: 700; letter-spacing: .08em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; pointer-events: none; text-shadow: 0 2px 8px rgba(0,0,0,.7); }
     .preview-line { fill: none; stroke: var(--accent-2); stroke-width: 2; stroke-dasharray: 7 5; pointer-events: none; }
     .selection-box { fill: rgba(36,183,255,.12); stroke: #24b7ff; stroke-width: 1.5; stroke-dasharray: 6 4; pointer-events: none; }
@@ -187,6 +193,7 @@
         <button class="tool" data-tool="workzone" title="Place a work zone"><strong>□</strong>Zone</button>
         <button class="tool" data-tool="legend" title="Place a diagram legend"><strong>LG</strong>Legend</button>
         <button class="tool" data-tool="equipment" title="Place equipment"><strong>EQ</strong>Equipment</button>
+        <button class="tool" data-tool="vertex" title="Place a 90-degree routing vertex"><strong>V</strong>Vertex</button>
         <button class="tool" data-tool="patch" title="Connect equipment to an expanded fiber strand"><strong>PC</strong>Patch Cable</button>
         <div class="tool-divider"></div>
         <button class="tool" id="undoBtn" title="Undo last change" aria-label="Undo last change" disabled><strong>&#8630;</strong>Undo</button>
@@ -259,7 +266,8 @@
         { key: 'patch', label: 'Patch cable' },
         { key: 'fiber', label: 'Fiber strands' },
         { key: 'equipment', label: 'Equipment / End Point' },
-        { key: 'cable', label: 'Cable trunk' }
+        { key: 'cable', label: 'Cable trunk' },
+        { key: 'vertex', label: '90° routing vertex' }
       ];
       const PRESETS = [12, 24, 36, 48, 72, 96, 144, 288, 432];
       const L = { TUBE_H: 22, TUBE_PAD: 11, PILL_W: 27, PILL_H: 14, PILL_RX: 6, FAN_GAP: 42, STRAND_R: 5.2, STRAND_STEP: 24, STRAND_PAD: 12, BO_TUBE: 142, BO_EXPANDED: 270, TRUNK: 190 };
@@ -288,14 +296,20 @@
       const MAGNET_RADIUS_PX = 42;
       const MAX_CABLE_STRAND_CONNECTIONS = 2;
       const MAX_EQUIPMENT_PORT_CONNECTIONS = 1;
+      const MAX_VERTEX_PORT_CONNECTIONS = 1;
+      const VERTEX_PORTS = ['left', 'top', 'right', 'bottom'];
+      const VERTEX_SIZE = 22;
+      const VERTEX_PORT_GAP = 14;
+      const ROUTE_LEAD = 18;
 
-      function blankState(name) { return { version: 4, projectName: name, viewport: { x: 0, y: 0, zoom: 1 }, cables: [], equipment: [], connections: [], workZones: [], legends: [] }; }
+      function blankState(name) { return { version: 5, projectName: name, viewport: { x: 0, y: 0, zoom: 1 }, cables: [], equipment: [], vertices: [], connections: [], workZones: [], legends: [] }; }
       function id(prefix) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
       function esc(value) { return String(value ?? '').replace(/[&<>'"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[c]); }
       function clamp(n, min, max) { return Math.max(min, Math.min(max, n)); }
       function num(value, fallback = 0) { const n = Number(value); return Number.isFinite(n) ? n : fallback; }
       function cableById(idValue) { return state.cables.find((c) => c.id === idValue); }
       function equipmentById(idValue) { return state.equipment.find((e) => e.id === idValue); }
+      function vertexById(idValue) { return state.vertices.find((vertex) => vertex.id === idValue); }
       function workzoneById(idValue) { return state.workZones.find((z) => z.id === idValue); }
       function legendById(idValue) { return state.legends.find((legend) => legend.id === idValue); }
       function cableTubes(cable) { return Math.ceil(Math.max(1, Number(cable.fiberCount) || 12) / 12); }
@@ -314,7 +328,7 @@
         const binder = BINDERS[group % BINDERS.length];
         return { fiberNumber, color, label: `${color.abb}${binder.suffix ? binder.suffix.replace('+', '-') : ''} (${fiberNumber})` };
       }
-      function connectorColor(ref) { if (ref?.cableId) { const cable = cableById(ref.cableId); return cable ? strandInfo(cable, ref.tubeIdx, ref.strandIdx).color.hex : '#84a2b5'; } if (ref?.equipmentId) return COLORS[(Number(ref.strandIdx) || 0) % COLORS.length].hex; return '#84a2b5'; }
+      function connectorColor(ref) { if (ref?.cableId) { const cable = cableById(ref.cableId); return cable ? strandInfo(cable, ref.tubeIdx, ref.strandIdx).color.hex : '#84a2b5'; } if (ref?.equipmentId) return COLORS[(Number(ref.strandIdx) || 0) % COLORS.length].hex; if (ref?.vertexId) return '#f7d54a'; return '#84a2b5'; }
       function cableUsedTubes(cableId) {
         const used = new Set();
         state.connections.forEach((connection) => [connection.from, connection.to].forEach((ref) => { if (ref.cableId === cableId) used.add(ref.tubeIdx); }));
@@ -366,8 +380,10 @@
         const y = equipment.y + 54 + ref.strandIdx * 26 + 13;
         return { x: equipment.x + (ref.side === 'left' ? -13 : width + 13), y };
       }
-      function getDotWorld(ref) { if (ref.cableId) { const cable = cableById(ref.cableId); return cable ? getCableDot(cable, ref) : null; } if (ref.equipmentId) { const equipment = equipmentById(ref.equipmentId); return equipment ? getEquipmentDot(equipment, ref) : null; } return null; }
-      function dotKey(ref) { return ref.cableId ? `c:${ref.cableId}:${ref.side}:${ref.tubeIdx}:${ref.strandIdx}` : `e:${ref.equipmentId}:${ref.side || 'right'}:${ref.strandIdx}`; }
+      function vertexPortOffset(vertex, port) { const half = clamp(num(vertex?.size, VERTEX_SIZE), 14, 80) / 2; if (port === 'left') return { x: -half - VERTEX_PORT_GAP, y: 0 }; if (port === 'right') return { x: half + VERTEX_PORT_GAP, y: 0 }; if (port === 'top') return { x: 0, y: -half - VERTEX_PORT_GAP }; return { x: 0, y: half + VERTEX_PORT_GAP }; }
+      function getVertexDot(vertex, ref) { const offset = vertexPortOffset(vertex, ref.port); return { x: vertex.x + offset.x, y: vertex.y + offset.y }; }
+      function getDotWorld(ref) { if (ref.cableId) { const cable = cableById(ref.cableId); return cable ? getCableDot(cable, ref) : null; } if (ref.equipmentId) { const equipment = equipmentById(ref.equipmentId); return equipment ? getEquipmentDot(equipment, ref) : null; } if (ref.vertexId) { const vertex = vertexById(ref.vertexId); return vertex ? getVertexDot(vertex, ref) : null; } return null; }
+      function dotKey(ref) { if (ref.cableId) return `c:${ref.cableId}:${ref.side}:${ref.tubeIdx}:${ref.strandIdx}`; if (ref.equipmentId) return `e:${ref.equipmentId}:${ref.side || 'right'}:${ref.strandIdx}`; if (ref.vertexId) return `v:${ref.vertexId}:${ref.port || 'right'}`; return ''; }
       function refsEqual(a, b) { return !!a && !!b && dotKey(a) === dotKey(b); }
       function dotIsSelected(ref) { return selectedDots.some((item) => refsEqual(item, ref)); }
       function clearDotSelection() { selectedDots = []; }
@@ -389,7 +405,7 @@
           return count + (refsEqual(connection.from, ref) || refsEqual(connection.to, ref) ? 1 : 0);
         }, 0);
       }
-      function maxConnectionsForConnector(ref) { return ref?.cableId ? MAX_CABLE_STRAND_CONNECTIONS : MAX_EQUIPMENT_PORT_CONNECTIONS; }
+      function maxConnectionsForConnector(ref) { return ref?.cableId ? MAX_CABLE_STRAND_CONNECTIONS : ref?.vertexId ? MAX_VERTEX_PORT_CONNECTIONS : MAX_EQUIPMENT_PORT_CONNECTIONS; }
       function connectorAtCapacity(ref) { return connectorConnectionCount(ref) >= maxConnectionsForConnector(ref); }
       function connectionExists(a, b) {
         return state.connections.some((connection) => (
@@ -413,6 +429,7 @@
           const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right'];
           sides.forEach((side) => { for (let strandIdx = 0; strandIdx < equipment.ports; strandIdx += 1) refs.push({ equipmentId: equipment.id, side, tubeIdx: 0, strandIdx }); });
         });
+        state.vertices.forEach((vertex) => VERTEX_PORTS.forEach((port) => refs.push({ vertexId: vertex.id, port })));
         return refs;
       }
 
@@ -437,6 +454,7 @@
         if (!a || !b) return false;
         if (a.cableId && b.cableId) return a.cableId === b.cableId && a.side === b.side;
         if (a.equipmentId && b.equipmentId) return a.equipmentId === b.equipmentId && a.side === b.side;
+        if (a.vertexId && b.vertexId) return a.vertexId === b.vertexId;
         return false;
       }
       function validConnectionPair(source, target) {
@@ -467,13 +485,49 @@
         return targets;
       }
 
+      function vertexDirectionVector(direction) {
+        if (direction === 'left') return { x: -1, y: 0 };
+        if (direction === 'top') return { x: 0, y: -1 };
+        if (direction === 'bottom') return { x: 0, y: 1 };
+        return { x: 1, y: 0 };
+      }
+      function addRoutePoint(points, point) {
+        const last = points[points.length - 1];
+        if (!last || Math.abs(last.x - point.x) > .01 || Math.abs(last.y - point.y) > .01) points.push(point);
+      }
+      function orthogonalRoutePoints(a, b, fromDirection = null, toDirection = null) {
+        const startLead = fromDirection ? (() => { const v = vertexDirectionVector(fromDirection); return { x: a.x + v.x * ROUTE_LEAD, y: a.y + v.y * ROUTE_LEAD }; })() : { ...a };
+        const endLead = toDirection ? (() => { const v = vertexDirectionVector(toDirection); return { x: b.x + v.x * ROUTE_LEAD, y: b.y + v.y * ROUTE_LEAD }; })() : { ...b };
+        const points = [{ ...a }]; addRoutePoint(points, startLead);
+        const startHorizontal = fromDirection === 'left' || fromDirection === 'right';
+        const endHorizontal = toDirection === 'left' || toDirection === 'right';
+        if (fromDirection && toDirection) {
+          if (startHorizontal !== endHorizontal) addRoutePoint(points, { x: endLead.x, y: startLead.y });
+          else if (startHorizontal) { const midY = (startLead.y + endLead.y) / 2; addRoutePoint(points, { x: startLead.x, y: midY }); addRoutePoint(points, { x: endLead.x, y: midY }); }
+          else { const midX = (startLead.x + endLead.x) / 2; addRoutePoint(points, { x: midX, y: startLead.y }); addRoutePoint(points, { x: midX, y: endLead.y }); }
+        } else if (fromDirection) {
+          addRoutePoint(points, startHorizontal ? { x: endLead.x, y: startLead.y } : { x: startLead.x, y: endLead.y });
+        } else if (toDirection) {
+          addRoutePoint(points, endHorizontal ? { x: endLead.x, y: startLead.y } : { x: startLead.x, y: endLead.y });
+        }
+        addRoutePoint(points, endLead); addRoutePoint(points, b);
+        return points;
+      }
+      function pointsPath(points) { return points.map((point, index) => `${index ? 'L' : 'M'} ${point.x} ${point.y}`).join(' '); }
+      function connectionPath(connection, a, b) {
+        const fromDirection = connection.from?.vertexId ? connection.from.port : null;
+        const toDirection = connection.to?.vertexId ? connection.to.port : null;
+        if (!fromDirection && !toDirection) return `M ${a.x} ${a.y} C ${(a.x + b.x) / 2} ${a.y}, ${(a.x + b.x) / 2} ${b.y}, ${b.x} ${b.y}`;
+        return pointsPath(orthogonalRoutePoints(a, b, fromDirection, toDirection));
+      }
+
       function setTool(next) {
         tool = next;
         strandDrag = null;
         labelDrag = null;
         boxSelect = null;
         document.querySelectorAll('[data-tool]').forEach((button) => button.classList.toggle('active', button.dataset.tool === tool));
-        const mode = tool === 'select' ? 'SELECT MODE' : tool === 'cable' ? 'CABLE MODE · CLICK CANVAS' : tool === 'equipment' ? 'END POINT MODE · CLICK CANVAS' : tool === 'legend' ? 'LEGEND MODE · CLICK CANVAS' : 'WORK ZONE MODE · CLICK CANVAS';
+        const mode = tool === 'select' ? 'SELECT MODE' : tool === 'cable' ? 'CABLE MODE · CLICK CANVAS' : tool === 'equipment' ? 'END POINT MODE · CLICK CANVAS' : tool === 'vertex' ? 'VERTEX MODE · CLICK CANVAS' : tool === 'legend' ? 'LEGEND MODE · CLICK CANVAS' : 'WORK ZONE MODE · CLICK CANVAS';
         $('#canvasMode').textContent = tool === 'endpoint' ? 'END POINT MODE Â· CLICK CANVAS' : tool === 'equipment' ? 'EQUIPMENT MODE Â· CLICK CANVAS' : tool === 'patch' ? 'PATCH CABLE MODE Â· DRAG EQUIPMENT PORT TO STRAND' : mode;
         renderItems();
       }
@@ -502,7 +556,7 @@
         showToast('Undid last change.');
       }
 
-      function render() { updateCanvasProjectTitle(); updateTransform(); renderWorkzones(); renderConnections(); renderItems(); renderLegends(); renderInspector(); updateUndoButton(); $('#emptyLayer').style.display = state.cables.length || state.equipment.length || state.workZones.length || state.legends.length ? 'none' : 'block'; }
+      function render() { updateCanvasProjectTitle(); updateTransform(); renderWorkzones(); renderConnections(); renderItems(); renderLegends(); renderInspector(); updateUndoButton(); $('#emptyLayer').style.display = state.cables.length || state.equipment.length || state.vertices.length || state.workZones.length || state.legends.length ? 'none' : 'block'; }
       function updateTransform() { const r = canvas.getBoundingClientRect(); const tx = r.width / 2 + state.viewport.x; const ty = r.height / 2 + state.viewport.y; world.setAttribute('transform', `translate(${tx} ${ty}) scale(${state.viewport.zoom})`); $('#zoomReadout').textContent = `${Math.round(state.viewport.zoom * 100)}%`; }
       function svgEl(tag, attrs = {}) { const el = document.createElementNS('http://www.w3.org/2000/svg', tag); Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v)); return el; }
       function clearLayer(idValue) { const layer = $(`#${idValue}`); layer.replaceChildren(); return layer; }
@@ -528,7 +582,7 @@
         const defs = svg.querySelector('defs'); defs?.querySelectorAll('[data-connection-gradient]').forEach((gradient) => gradient.remove());
         state.connections.forEach((connection) => {
           const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return;
-          const path = `M ${a.x} ${a.y} C ${(a.x + b.x) / 2} ${a.y}, ${(a.x + b.x) / 2} ${b.y}, ${b.x} ${b.y}`;
+          const path = connectionPath(connection, a, b);
           const hit = svgEl('path', { d: path, class: 'connection-hit' });
           const colored = connection.type !== 'patch'; const gradientId = `connection-gradient-${String(connection.id).replace(/[^a-z0-9_-]/gi, '-')}`;
           if (colored && defs) { const gradient = svgEl('linearGradient', { id: gradientId, x1: 0, y1: 0, x2: 1, y2: 0, 'data-connection-gradient': 'true' }); gradient.append(svgEl('stop', { offset: 0, 'stop-color': connectorColor(connection.from) }), svgEl('stop', { offset: 1, 'stop-color': connectorColor(connection.to) })); defs.append(gradient); }
@@ -549,7 +603,7 @@
           sources.forEach((source, index) => {
             const a = getDotWorld(source); const targetRef = targets[index]; const current = targetRef ? getDotWorld(targetRef) : (refsEqual(source, strandDrag.from) ? strandDrag.current : null);
             if (!a || !current) return;
-            const p = `M ${a.x} ${a.y} C ${(a.x + current.x) / 2} ${a.y}, ${(a.x + current.x) / 2} ${current.y}, ${current.x} ${current.y}`;
+            const p = connectionPath({ from: source, to: targetRef }, a, current);
             previewLayer.append(svgEl('path', { d: p, class: 'preview-line' }));
             if (targetRef) previewLayer.append(svgEl('circle', { cx: current.x, cy: current.y, r: 12, fill: 'rgba(36,183,255,.12)', stroke: '#24b7ff', 'stroke-width': 2, 'stroke-dasharray': '3 2', 'pointer-events': 'none' }));
           });
@@ -560,6 +614,7 @@
         const layer = clearLayer('itemLayer');
         state.cables.forEach((cable) => renderCable(cable, layer));
         state.equipment.forEach((equipment) => renderEquipment(equipment, layer));
+        state.vertices.forEach((vertex) => renderVertex(vertex, layer));
       }
 
       function renderLegendIcon(type, x, y, parent, scale = 1) {
@@ -570,6 +625,8 @@
           ['#1a73e8', '#f57c00', '#2e7d32'].forEach((color, index) => icon.append(svgEl('path', { d: `M 2 ${4 + index * 5} C 9 ${1 + index * 5}, 17 ${7 + index * 5}, 26 ${4 + index * 5}`, fill: 'none', stroke: color, 'stroke-width': 1.6 })));
         } else if (type === 'equipment') {
           icon.append(svgEl('rect', { x: 2, y: 1, width: 25, height: 15, rx: 3, fill: 'rgba(36,183,255,.18)', stroke: '#24b7ff', 'stroke-width': 1.5 }), svgEl('line', { x1: 4, y1: 5, x2: 25, y2: 5, stroke: '#24b7ff', 'stroke-width': 1 }), svgEl('circle', { cx: 7, cy: 11, r: 1.5, fill: '#24b7ff' }), svgEl('circle', { cx: 12, cy: 11, r: 1.5, fill: '#24b7ff' }));
+        } else if (type === 'vertex') {
+          icon.append(svgEl('circle', { cx: 15, cy: 8, r: 6, fill: '#172433', stroke: '#f7d54a', 'stroke-width': 1.5 }), svgEl('path', { d: 'M 2 8 H 9 M 21 8 H 28 M 15 1 V 5 M 15 11 V 16', fill: 'none', stroke: '#f7d54a', 'stroke-width': 1.5 }));
         } else {
           icon.append(svgEl('rect', { x: 8, y: 0, width: 13, height: 18, rx: 2, fill: '#10202b', stroke: '#f7d54a', 'stroke-width': 1.5 }), svgEl('rect', { x: 4, y: 4, width: 5, height: 3, rx: 1, fill: '#1a73e8' }), svgEl('rect', { x: 20, y: 11, width: 5, height: 3, rx: 1, fill: '#2e7d32' }));
         }
@@ -662,6 +719,24 @@
         });
       }
 
+      function renderVertex(vertex, parent) {
+        const size = clamp(num(vertex.size, VERTEX_SIZE), 14, 80); const half = size / 2;
+        const group = svgEl('g', { transform: `translate(${vertex.x} ${vertex.y})`, 'data-vertex-id': vertex.id });
+        group.addEventListener('pointerdown', (event) => startItemDrag(event, 'vertex', vertex.id));
+        group.addEventListener('click', (event) => { if (!event.target.closest('.vertex-port-hit')) { event.stopPropagation(); select('vertex', vertex.id); } });
+        const body = svgEl('circle', { cx: 0, cy: 0, r: half, class: `route-vertex${selected?.type === 'vertex' && selected.id === vertex.id ? ' selected' : ''}` });
+        const label = svgEl('text', { x: 0, y: 3, class: 'route-vertex-label' }); label.textContent = '90°';
+        group.append(body, label);
+        VERTEX_PORTS.forEach((port) => {
+          const offset = vertexPortOffset(vertex, port); const ref = { vertexId: vertex.id, port }; const connected = connectorConnectionCount(ref) > 0; const hot = hoverDot && refsEqual(hoverDot, ref);
+          const circle = svgEl('circle', { cx: offset.x, cy: offset.y, r: connected ? 5 : 4, class: `route-vertex-port${hot ? ' hot' : ''}`, fill: connectorColor(ref), 'pointer-events': 'none' });
+          const hit = svgEl('circle', { cx: offset.x, cy: offset.y, r: 13, class: 'vertex-port-hit' });
+          hit.addEventListener('pointerdown', (event) => startStrandDrag(event, ref)); hit.addEventListener('pointerenter', () => { hoverDot = ref; renderItems(); }); hit.addEventListener('pointerleave', () => { hoverDot = null; renderItems(); }); hit.addEventListener('click', (event) => { event.stopPropagation(); setDotSelection(ref, event.shiftKey); });
+          group.append(circle, hit);
+        });
+        parent.append(group);
+      }
+
       function renderEquipment(equipment, parent) {
         const size = equipmentSize(equipment); const width = size.width; const height = size.height; const group = svgEl('g', { transform: `translate(${equipment.x} ${equipment.y})`, 'data-equipment-id': equipment.id });
         group.addEventListener('pointerdown', (event) => startItemDrag(event, 'equipment', equipment.id)); group.addEventListener('click', (event) => { if (!event.target.closest('.equipment-port-hit')) { event.stopPropagation(); select('equipment', equipment.id); } });
@@ -684,8 +759,8 @@
       function toggleTube(cableId, side, tubeIdx) { const cable = cableById(cableId); if (!cable) return; recordHistory(); const key = side === 'left' ? 'leftExp' : 'rightExp'; const current = cable[key] || []; cable[key] = current.includes(tubeIdx) ? current.filter((i) => i !== tubeIdx) : [...current, tubeIdx].sort((a, b) => a - b); autosave(); render(); }
 
       function startItemDrag(event, type, idValue) {
-        if (event.button !== 0 || tool !== 'select' || event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .tube-row-hit, .equipment-resize-handle, .legend-resize-handle')) return;
-        event.stopPropagation(); const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); select(type, idValue); const point = screenToWorld(event.clientX, event.clientY); drag = { type, id: idValue, offsetX: item.x - point.x, offsetY: item.y - point.y, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId);
+        if (event.button !== 0 || tool !== 'select' || event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .vertex-port-hit, .tube-row-hit, .equipment-resize-handle, .legend-resize-handle')) return;
+        event.stopPropagation(); const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'vertex' ? vertexById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); select(type, idValue); const point = screenToWorld(event.clientX, event.clientY); drag = { type, id: idValue, offsetX: item.x - point.x, offsetY: item.y - point.y, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId);
       }
 
       function startWorkzoneResize(event, idValue) {
@@ -763,21 +838,23 @@
 
       function createCable(x, y) { recordHistory(); const cable = { id: id('cable'), name: `BUILDING-${state.cables.length + 1}`, cableName: `CABLE-${state.cables.length + 1}`, cableSegment: '1', to: '', from: '', fiberCount: 48, x: x - 190, y: y - 220, leftExp: [], rightExp: [], isCollapsed: false, fromLabelOffset: { x: 0, y: 0 }, toLabelOffset: { x: 0, y: 0 } }; state.cables.push(cable); select('cable', cable.id); autosave(); }
       function createEquipment(x, y, kind = 'endpoint') { recordHistory(); const count = state.equipment.filter((item) => (item.kind || 'endpoint') === kind).length + 1; const equipment = { id: id('equipment'), kind, name: `${kind === 'equipment' ? 'EQUIPMENT' : 'END-POINT'}-${count}`, building: '', ports: 8, portLabels: [], width: 230, height: 54 + 8 * 26 + 16, x: x - 115, y: y - 80, side: 'right' }; state.equipment.push(equipment); select('equipment', equipment.id); autosave(); }
+      function createVertex(x, y) { recordHistory(); const vertex = { id: id('vertex'), label: '90° BEND', size: VERTEX_SIZE, x, y }; state.vertices.push(vertex); select('vertex', vertex.id); autosave(); }
       function createWorkzone(x, y) { recordHistory(); const zone = { id: id('zone'), x: x - 160, y: y - 90, width: 320, height: 180, label: 'WORK ZONE', description: 'Add notes in the inspector' }; state.workZones.push(zone); select('workzone', zone.id); autosave(); }
       function createLegend(x, y) { recordHistory(); const legend = { id: id('legend'), x: x - 115, y: y - 110, width: 230, height: 220, title: 'DIAGRAM LEGEND' }; state.legends.push(legend); select('legend', legend.id); autosave(); }
 
-      function updateItem(type, idValue, field, value) { const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); if (field === 'fiberCount') item.fiberCount = clamp(Math.round(num(value, 12)), 1, 5000); else if (field === 'ports') { item.ports = clamp(Math.round(num(value, 8)), 1, 64); item.portLabels = (item.portLabels || []).slice(0, item.ports); } else if (field === 'width' || field === 'height') item[field] = type === 'legend' ? clamp(Math.round(num(value, field === 'width' ? 230 : 300)), field === 'width' ? 180 : 180, field === 'width' ? 900 : 1200) : clamp(Math.round(num(value, 100)), 60, 2000); else item[field] = value; autosave(); if (type === 'legend') render(); else if (field === 'fiberCount' || field === 'ports' || field === 'side' || field === 'isCollapsed') render(); else { renderItems(); renderWorkzones(); renderConnections(); }
+      function updateItem(type, idValue, field, value) { const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'vertex' ? vertexById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); if (field === 'fiberCount') item.fiberCount = clamp(Math.round(num(value, 12)), 1, 5000); else if (field === 'ports') { item.ports = clamp(Math.round(num(value, 8)), 1, 64); item.portLabels = (item.portLabels || []).slice(0, item.ports); } else if (field === 'width' || field === 'height') item[field] = type === 'legend' ? clamp(Math.round(num(value, field === 'width' ? 230 : 300)), field === 'width' ? 180 : 180, field === 'width' ? 900 : 1200) : clamp(Math.round(num(value, 100)), 60, 2000); else if (field === 'size' && type === 'vertex') item.size = clamp(Math.round(num(value, VERTEX_SIZE)), 14, 80); else item[field] = value; autosave(); if (type === 'legend') render(); else if (field === 'fiberCount' || field === 'ports' || field === 'side' || field === 'isCollapsed' || (type === 'vertex' && field === 'size')) render(); else { renderItems(); renderWorkzones(); renderConnections(); }
       }
 
       function renderInspector() {
         const content = $('#inspectorContent');
-        if (!selected || (selected.type === 'dot' && !selected.ref)) { content.innerHTML = `<h2>Workspace</h2><p class="sub">A local-first fiber splice diagram editor based on the supplied workspace concept.</p><div class="notice">Place a cable or end point from the toolbar. Expand a tube by clicking its colored pill, then drag a strand dot to another strand dot to create a splice.</div><div class="section"><h3>Browser storage</h3><div class="meta-grid"><div class="meta-card"><div class="k">Project</div><div class="v">${esc(state.projectName)}</div></div><div class="meta-card"><div class="k">Items</div><div class="v">${state.cables.length + state.equipment.length + state.workZones.length}</div></div></div><div class="button-row" style="margin-top:10px"><button class="button" id="saveNowBtn">Save locally</button><button class="button" id="showProjectsBtn">Project list</button></div></div><div class="section"><h3>Current tool</h3><p class="sub">${tool === 'cable' ? 'Click the canvas to place a cable.' : tool === 'equipment' ? 'Click the canvas to place an end point.' : tool === 'workzone' ? 'Click the canvas to place a work zone.' : 'Select and drag items. Use middle/right drag to pan.'}</p></div>`; $('#saveNowBtn')?.addEventListener('click', () => { autosave(); showToast('Saved to this browser.'); }); $('#showProjectsBtn')?.addEventListener('click', openProjects); return; }
+        if (!selected || (selected.type === 'dot' && !selected.ref)) { content.innerHTML = `<h2>Workspace</h2><p class="sub">A local-first fiber splice diagram editor based on the supplied workspace concept.</p><div class="notice">Place a cable, end point, or Vertex from the toolbar. A Vertex provides four snap ports for clean 90-degree cable routing.</div><div class="section"><h3>Browser storage</h3><div class="meta-grid"><div class="meta-card"><div class="k">Project</div><div class="v">${esc(state.projectName)}</div></div><div class="meta-card"><div class="k">Items</div><div class="v">${state.cables.length + state.equipment.length + state.vertices.length + state.workZones.length}</div></div></div><div class="button-row" style="margin-top:10px"><button class="button" id="saveNowBtn">Save locally</button><button class="button" id="showProjectsBtn">Project list</button></div></div><div class="section"><h3>Current tool</h3><p class="sub">${tool === 'cable' ? 'Click the canvas to place a cable.' : tool === 'equipment' ? 'Click the canvas to place an end point.' : tool === 'vertex' ? 'Click the canvas to place a 90-degree routing vertex.' : tool === 'workzone' ? 'Click the canvas to place a work zone.' : 'Select and drag items. Use middle/right drag to pan.'}</p></div>`; $('#saveNowBtn')?.addEventListener('click', () => { autosave(); showToast('Saved to this browser.'); }); $('#showProjectsBtn')?.addEventListener('click', openProjects); return; }
         if (selected.type === 'cable') renderCableInspector(cableById(selected.id));
         else if (selected.type === 'equipment') renderEquipmentInspector(equipmentById(selected.id));
+        else if (selected.type === 'vertex') renderVertexInspector(vertexById(selected.id));
         else if (selected.type === 'workzone') renderWorkzoneInspector(workzoneById(selected.id));
         else if (selected.type === 'legend') renderLegendInspector(legendById(selected.id));
         else if (selected.type === 'connection') renderConnectionInspector(state.connections.find((c) => c.id === selected.id));
-         else { const count = Math.max(1, selectedDots.length); const used = selected.ref ? connectorConnectionCount(selected.ref) : 0; const limit = selected.ref ? maxConnectionsForConnector(selected.ref) : MAX_CABLE_STRAND_CONNECTIONS; content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Shift-click connectors to select a group, then drag from any selected connector to the matching destination set.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="notice">${used} of ${limit} link${limit === 1 ? '' : 's'} in use. A cable strand can carry an equipment link and a next-cable link.</div><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`; $('#disconnectDotBtn').addEventListener('click', disconnectSelected); }
+         else { const count = Math.max(1, selectedDots.length); const used = selected.ref ? connectorConnectionCount(selected.ref) : 0; const limit = selected.ref ? maxConnectionsForConnector(selected.ref) : MAX_CABLE_STRAND_CONNECTIONS; const connectorHelp = selected.ref?.vertexId ? 'A vertex port accepts one link; use another port on the same vertex to continue the route.' : 'A cable strand can carry an equipment link and a next-cable link.'; content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Shift-click connectors to select a group, then drag from any selected connector to the matching destination set.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="notice">${used} of ${limit} link${limit === 1 ? '' : 's'} in use. ${connectorHelp}</div><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`; $('#disconnectDotBtn').addEventListener('click', disconnectSelected); }
       }
 
       function cloneSelectedCable() {
@@ -790,6 +867,14 @@
           const clone = JSON.parse(JSON.stringify(source)); const copyNumber = index + 1; clone.id = id('cable'); clone.name = `${source.name || 'BUILDING'} - COPY ${copyNumber}`; clone.cableName = `${source.cableName || 'CABLE'} - COPY ${copyNumber}`; clone.x = source.x + 80 * ((index % 4) + 1); clone.y = source.y + 70 * (Math.floor(index / 4) + 1); clone.leftExp = [...(source.leftExp || [])]; clone.rightExp = [...(source.rightExp || [])]; clone.fromLabelOffset = { ...(source.fromLabelOffset || { x: 0, y: 0 }) }; clone.toLabelOffset = { ...(source.toLabelOffset || { x: 0, y: 0 }) }; state.cables.push(clone); lastClone = clone;
         }
         if (lastClone) { selected = { type: 'cable', id: lastClone.id }; clearDotSelection(); autosave(); render(); showToast(`${count} cable ${count === 1 ? 'copy' : 'copies'} created.`); }
+      }
+
+      function renderVertexInspector(vertex) {
+        if (!vertex) return;
+        $('#inspectorContent').innerHTML = `<h2>90° routing vertex</h2><p class="sub">Use this bend point to route a connection between rows. Connect to one or more of its four snap ports; links touching the vertex use 90-degree turns.</p><div class="field"><label>Label</label><input id="vertexLabel" value="${esc(vertex.label || '90° BEND')}"></div><div class="field"><label>Size</label><input id="vertexSize" type="number" min="14" max="80" value="${clamp(num(vertex.size, VERTEX_SIZE), 14, 80)}"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Ports</div><div class="v">4 snap ports</div></div><div class="meta-card"><div class="k">Links / port</div><div class="v">1</div></div></div></div><div class="section"><button class="button danger" id="deleteSelected">Delete vertex</button></div>`;
+        $('#vertexLabel').addEventListener('input', (e) => updateItem('vertex', vertex.id, 'label', e.target.value));
+        $('#vertexSize').addEventListener('change', (e) => updateItem('vertex', vertex.id, 'size', e.target.value));
+        $('#deleteSelected').addEventListener('click', deleteSelected);
       }
 
       function renderCableInspector(cable) {
@@ -826,10 +911,10 @@
       function renderConnectionInspector(connection) { if (!connection) return; const isPatch = connection.type === 'patch'; const title = isPatch ? 'Patch cable' : 'Splice connection'; const description = isPatch ? 'This patch cable links an End Point or Equipment port to an OSP fiber strand.' : 'This is a strand-to-strand splice connection.'; const nameLabel = isPatch ? 'Patch cable name' : 'Circuit name'; $('#inspectorContent').innerHTML = `<h2>${title}</h2><p class="sub">${description}</p><div class="field"><label>${nameLabel}</label><input id="connectionName" value="${esc(connection.circuitName || '')}" placeholder="e.g. CORE-S1-P24"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">From</div><div class="v">${esc(dotKey(connection.from))}</div></div><div class="meta-card"><div class="k">To</div><div class="v">${esc(dotKey(connection.to))}</div></div></div></div><div class="section"><button class="button danger" id="disconnectSelected">Disconnect</button></div>`; $('#connectionName').addEventListener('input', (e) => { connection.circuitName = e.target.value; autosave(); }); $('#disconnectSelected').addEventListener('click', disconnectSelected); }
 
       function disconnectSelected() { if (selected?.type === 'connection') { const before = state.connections.length; const next = state.connections.filter((c) => c.id !== selected.id); if (next.length === before) { showToast('Connection no longer exists.', 'error'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast('Connection disconnected.'); return; } if (!selected?.ref) return; const refs = selectedDots.length ? selectedDots : [selected.ref]; const before = state.connections.length; const next = state.connections.filter((c) => !refs.some((ref) => refsEqual(c.from, ref) || refsEqual(c.to, ref))); if (next.length === before) { showToast('Selected strand(s) are not connected.'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast(refs.length > 1 ? `${refs.length} connections disconnected.` : 'Connection disconnected.'); }
-      function deleteSelected() { if (!selected) return; recordHistory(); if (selected.type === 'cable') { state.connections = state.connections.filter((c) => c.from.cableId !== selected.id && c.to.cableId !== selected.id); state.cables = state.cables.filter((c) => c.id !== selected.id); } else if (selected.type === 'equipment') { state.connections = state.connections.filter((c) => c.from.equipmentId !== selected.id && c.to.equipmentId !== selected.id); state.equipment = state.equipment.filter((e) => e.id !== selected.id); } else if (selected.type === 'workzone') state.workZones = state.workZones.filter((z) => z.id !== selected.id); else if (selected.type === 'legend') state.legends = state.legends.filter((legend) => legend.id !== selected.id); else if (selected.type === 'connection') state.connections = state.connections.filter((c) => c.id !== selected.id); else if (selected.type === 'dot') { disconnectSelected(); return; } selected = null; clearDotSelection(); autosave(); render(); }
+      function deleteSelected() { if (!selected) return; recordHistory(); if (selected.type === 'cable') { state.connections = state.connections.filter((c) => c.from.cableId !== selected.id && c.to.cableId !== selected.id); state.cables = state.cables.filter((c) => c.id !== selected.id); } else if (selected.type === 'equipment') { state.connections = state.connections.filter((c) => c.from.equipmentId !== selected.id && c.to.equipmentId !== selected.id); state.equipment = state.equipment.filter((e) => e.id !== selected.id); } else if (selected.type === 'vertex') { state.connections = state.connections.filter((c) => c.from.vertexId !== selected.id && c.to.vertexId !== selected.id); state.vertices = state.vertices.filter((vertex) => vertex.id !== selected.id); } else if (selected.type === 'workzone') state.workZones = state.workZones.filter((z) => z.id !== selected.id); else if (selected.type === 'legend') state.legends = state.legends.filter((legend) => legend.id !== selected.id); else if (selected.type === 'connection') state.connections = state.connections.filter((c) => c.id !== selected.id); else if (selected.type === 'dot') { disconnectSelected(); return; } selected = null; clearDotSelection(); autosave(); render(); }
 
       function fitView() { const bounds = getBounds(); if (!bounds) { state.viewport = { x: 0, y: 0, zoom: 1 }; updateTransform(); return; } const r = canvas.getBoundingClientRect(); const width = Math.max(500, bounds.maxX - bounds.minX + 180); const height = Math.max(350, bounds.maxY - bounds.minY + 180); state.viewport.zoom = clamp(Math.min(r.width / width, r.height / height), .12, 1.4); state.viewport.x = -((bounds.minX + bounds.maxX) / 2) * state.viewport.zoom; state.viewport.y = -((bounds.minY + bounds.maxY) / 2) * state.viewport.zoom; autosave(); updateTransform(); }
-      function getBounds() { const points = []; state.cables.forEach((c) => { const s = cableSize(c); const fromOffset = c.fromLabelOffset || { x: 0, y: 0 }; const toOffset = c.toLabelOffset || { x: 0, y: 0 }; points.push({ x: c.x + fromOffset.x, y: c.y - 45 + fromOffset.y }, { x: c.x + toOffset.x, y: c.y - 45 + toOffset.y }, { x: c.x, y: c.y }, { x: c.x + s.width, y: c.y + s.height }); }); state.equipment.forEach((e) => { const s = equipmentSize(e); points.push({ x: e.x, y: e.y }, { x: e.x + s.width, y: e.y + s.height }); }); state.workZones.forEach((z) => points.push({ x: z.x, y: z.y }, { x: z.x + z.width, y: z.y + z.height })); state.legends.forEach((legend) => points.push({ x: legend.x, y: legend.y }, { x: legend.x + legend.width, y: legend.y + legend.height })); if (!points.length) return null; return { minX: Math.min(...points.map((p) => p.x)), maxX: Math.max(...points.map((p) => p.x)), minY: Math.min(...points.map((p) => p.y)), maxY: Math.max(...points.map((p) => p.y)) }; }
+      function getBounds() { const points = []; state.cables.forEach((c) => { const s = cableSize(c); const fromOffset = c.fromLabelOffset || { x: 0, y: 0 }; const toOffset = c.toLabelOffset || { x: 0, y: 0 }; points.push({ x: c.x + fromOffset.x, y: c.y - 45 + fromOffset.y }, { x: c.x + toOffset.x, y: c.y - 45 + toOffset.y }, { x: c.x, y: c.y }, { x: c.x + s.width, y: c.y + s.height }); }); state.equipment.forEach((e) => { const s = equipmentSize(e); points.push({ x: e.x, y: e.y }, { x: e.x + s.width, y: e.y + s.height }); }); state.vertices.forEach((vertex) => { const reach = clamp(num(vertex.size, VERTEX_SIZE), 14, 80) / 2 + VERTEX_PORT_GAP; points.push({ x: vertex.x - reach, y: vertex.y - reach }, { x: vertex.x + reach, y: vertex.y + reach }); }); state.workZones.forEach((z) => points.push({ x: z.x, y: z.y }, { x: z.x + z.width, y: z.y + z.height })); state.legends.forEach((legend) => points.push({ x: legend.x, y: legend.y }, { x: legend.x + legend.width, y: legend.y + legend.height })); if (!points.length) return null; return { minX: Math.min(...points.map((p) => p.x)), maxX: Math.max(...points.map((p) => p.x)), minY: Math.min(...points.map((p) => p.y)), maxY: Math.max(...points.map((p) => p.y)) }; }
       function finishBoxSelect() {
         if (!boxSelect) return;
         const selection = boxSelect; boxSelect = null;
@@ -842,14 +927,14 @@
       }
       function zoomAt(clientX, clientY, nextZoom) { const r = canvas.getBoundingClientRect(); const before = screenToWorld(clientX, clientY); state.viewport.zoom = clamp(nextZoom, .12, 3.5); state.viewport.x = clientX - r.left - r.width / 2 - before.x * state.viewport.zoom; state.viewport.y = clientY - r.top - r.height / 2 - before.y * state.viewport.zoom; updateTransform(); autosave(); }
 
-      function onCanvasPointerDown(event) { if (event.button === 1 || event.button === 2 || (event.button === 0 && event.shiftKey && !event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit'))) { panDrag = { x: event.clientX, y: event.clientY, panX: state.viewport.x, panY: state.viewport.y, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId); event.preventDefault(); return; } if (event.button !== 0 || event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, [data-cable-id], [data-equipment-id], [data-workzone-id], [data-legend-id]')) return; const p = screenToWorld(event.clientX, event.clientY); if (tool === 'cable') { createCable(p.x, p.y); setTool('select'); } else if (tool === 'endpoint' || tool === 'equipment') { createEquipment(p.x, p.y, tool === 'equipment' ? 'equipment' : 'endpoint'); setTool('select'); } else if (tool === 'workzone') { createWorkzone(p.x, p.y); setTool('select'); } else if (tool === 'legend') { createLegend(p.x, p.y); setTool('select'); } else if (tool === 'select' || tool === 'patch') { boxSelect = { start: p, current: p, additive: event.ctrlKey || event.metaKey, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId); event.preventDefault(); renderConnections(); } }
-      function onPointerMove(event) { if (labelDrag) { const cable = cableById(labelDrag.cableId); if (!cable) return; const point = screenToWorld(event.clientX, event.clientY); cable[labelDrag.key] = { x: labelDrag.offsetX + point.x - labelDrag.startX, y: labelDrag.offsetY + point.y - labelDrag.startY }; renderItems(); renderConnections(); return; } if (resize) { const point = screenToWorld(event.clientX, event.clientY); if (resize.type === 'equipment') { const equipment = equipmentById(resize.id); if (!equipment) return; equipment.width = clamp(resize.startWidth + point.x - resize.startX, 160, 2000); equipment.height = clamp(resize.startHeight + point.y - resize.startY, equipmentMinHeight(equipment), 3000); renderItems(); renderConnections(); } else if (resize.type === 'legend') { const legend = legendById(resize.id); if (!legend) return; legend.width = clamp(resize.startWidth + point.x - resize.startX, 180, 900); legend.height = clamp(resize.startHeight + point.y - resize.startY, 180, 1200); renderLegends(); } else { const zone = workzoneById(resize.id); if (!zone) return; zone.width = clamp(resize.startWidth + point.x - resize.startX, 60, 2000); zone.height = clamp(resize.startHeight + point.y - resize.startY, 60, 2000); renderWorkzones(); } return; } if (panDrag) { state.viewport.x = panDrag.panX + event.clientX - panDrag.x; state.viewport.y = panDrag.panY + event.clientY - panDrag.y; updateTransform(); return; } if (boxSelect) { boxSelect.current = screenToWorld(event.clientX, event.clientY); renderConnections(); return; } if (strandDrag) { const point = screenToWorld(event.clientX, event.clientY); const sources = strandDrag.sources || [strandDrag.from]; strandDrag.snapTargets = findGroupMagneticTargets(point, sources, strandDrag.from) || []; strandDrag.snapTarget = strandDrag.snapTargets[0] || null; strandDrag.current = strandDrag.snapTarget ? getDotWorld(strandDrag.snapTarget) : point; renderConnections(); return; } if (drag) { const item = drag.type === 'cable' ? cableById(drag.id) : drag.type === 'equipment' ? equipmentById(drag.id) : drag.type === 'workzone' ? workzoneById(drag.id) : legendById(drag.id); if (!item) return; const p = screenToWorld(event.clientX, event.clientY); item.x = p.x + drag.offsetX; item.y = p.y + drag.offsetY; renderWorkzones(); renderItems(); renderLegends(); renderConnections(); } }
+      function onCanvasPointerDown(event) { if (event.button === 1 || event.button === 2 || (event.button === 0 && event.shiftKey && !event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .vertex-port-hit'))) { panDrag = { x: event.clientX, y: event.clientY, panX: state.viewport.x, panY: state.viewport.y, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId); event.preventDefault(); return; } if (event.button !== 0 || event.target.closest('.strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .vertex-port-hit, [data-cable-id], [data-equipment-id], [data-vertex-id], [data-workzone-id], [data-legend-id]')) return; const p = screenToWorld(event.clientX, event.clientY); if (tool === 'cable') { createCable(p.x, p.y); setTool('select'); } else if (tool === 'endpoint' || tool === 'equipment') { createEquipment(p.x, p.y, tool === 'equipment' ? 'equipment' : 'endpoint'); setTool('select'); } else if (tool === 'vertex') { createVertex(p.x, p.y); setTool('select'); } else if (tool === 'workzone') { createWorkzone(p.x, p.y); setTool('select'); } else if (tool === 'legend') { createLegend(p.x, p.y); setTool('select'); } else if (tool === 'select' || tool === 'patch') { boxSelect = { start: p, current: p, additive: event.ctrlKey || event.metaKey, pointerId: event.pointerId }; svg.setPointerCapture?.(event.pointerId); event.preventDefault(); renderConnections(); } }
+      function onPointerMove(event) { if (labelDrag) { const cable = cableById(labelDrag.cableId); if (!cable) return; const point = screenToWorld(event.clientX, event.clientY); cable[labelDrag.key] = { x: labelDrag.offsetX + point.x - labelDrag.startX, y: labelDrag.offsetY + point.y - labelDrag.startY }; renderItems(); renderConnections(); return; } if (resize) { const point = screenToWorld(event.clientX, event.clientY); if (resize.type === 'equipment') { const equipment = equipmentById(resize.id); if (!equipment) return; equipment.width = clamp(resize.startWidth + point.x - resize.startX, 160, 2000); equipment.height = clamp(resize.startHeight + point.y - resize.startY, equipmentMinHeight(equipment), 3000); renderItems(); renderConnections(); } else if (resize.type === 'legend') { const legend = legendById(resize.id); if (!legend) return; legend.width = clamp(resize.startWidth + point.x - resize.startX, 180, 900); legend.height = clamp(resize.startHeight + point.y - resize.startY, 180, 1200); renderLegends(); } else { const zone = workzoneById(resize.id); if (!zone) return; zone.width = clamp(resize.startWidth + point.x - resize.startX, 60, 2000); zone.height = clamp(resize.startHeight + point.y - resize.startY, 60, 2000); renderWorkzones(); } return; } if (panDrag) { state.viewport.x = panDrag.panX + event.clientX - panDrag.x; state.viewport.y = panDrag.panY + event.clientY - panDrag.y; updateTransform(); return; } if (boxSelect) { boxSelect.current = screenToWorld(event.clientX, event.clientY); renderConnections(); return; } if (strandDrag) { const point = screenToWorld(event.clientX, event.clientY); const sources = strandDrag.sources || [strandDrag.from]; strandDrag.snapTargets = findGroupMagneticTargets(point, sources, strandDrag.from) || []; strandDrag.snapTarget = strandDrag.snapTargets[0] || null; strandDrag.current = strandDrag.snapTarget ? getDotWorld(strandDrag.snapTarget) : point; renderConnections(); return; } if (drag) { const item = drag.type === 'cable' ? cableById(drag.id) : drag.type === 'equipment' ? equipmentById(drag.id) : drag.type === 'vertex' ? vertexById(drag.id) : drag.type === 'workzone' ? workzoneById(drag.id) : legendById(drag.id); if (!item) return; const p = screenToWorld(event.clientX, event.clientY); item.x = p.x + drag.offsetX; item.y = p.y + drag.offsetY; renderWorkzones(); renderItems(); renderLegends(); renderConnections(); } }
       function onPointerUp(event) { if (labelDrag) { labelDrag = null; autosave(); render(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (resize) { resize = null; autosave(); render(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (boxSelect) { finishBoxSelect(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (strandDrag) { finishStrandDrag(); if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); return; } if (panDrag) { panDrag = null; autosave(); } if (drag) { drag = null; autosave(); } if (svg.hasPointerCapture?.(event.pointerId)) svg.releasePointerCapture(event.pointerId); }
       function onWheel(event) { event.preventDefault(); zoomAt(event.clientX, event.clientY, state.viewport.zoom * (event.deltaY > 0 ? .9 : 1.1)); }
 
       function projectIndex() { try { return JSON.parse(localStorage.getItem(STORAGE_INDEX) || '[]'); } catch { return []; } }
       function setProjectIndex(index) { localStorage.setItem(STORAGE_INDEX, JSON.stringify(index)); }
-      function serialize() { return JSON.parse(JSON.stringify({ ...state, version: 4 })); }
+      function serialize() { return JSON.parse(JSON.stringify({ ...state, version: 5 })); }
       function autosave() { if (!currentProjectId) return; const doc = serialize(); doc.updatedAt = new Date().toISOString(); localStorage.setItem(`fiber_splice_project_${currentProjectId}`, JSON.stringify(doc)); const index = projectIndex().filter((p) => p.id !== currentProjectId); index.push({ id: currentProjectId, name: state.projectName, updatedAt: doc.updatedAt }); setProjectIndex(index); localStorage.setItem(STORAGE_CURRENT, currentProjectId); saveStateLabel(`Saved locally · ${new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`); }
       function loadProject(idValue) { const raw = localStorage.getItem(`fiber_splice_project_${idValue}`); if (!raw) return false; try { state = normalize(JSON.parse(raw)); currentProjectId = idValue; selected = null; clearDotSelection(); clearHistory(); render(); saveStateLabel('Loaded from browser storage'); return true; } catch { return false; } }
       function createProject(name) { currentProjectId = id('project'); state = blankState(name || 'Untitled Project'); clearDotSelection(); clearHistory(); autosave(); selected = null; render(); }
@@ -864,9 +949,10 @@
       function dxfRect(layer, x, y, width, height) { return dxfLine(layer, x, y, x + width, y) + dxfLine(layer, x + width, y, x + width, y + height) + dxfLine(layer, x + width, y + height, x, y + height) + dxfLine(layer, x, y + height, x, y); }
       function cubicPoints(a, c1, c2, b, segments = 18) { const points = []; for (let i = 0; i <= segments; i += 1) { const t = i / segments; const mt = 1 - t; points.push({ x: mt * mt * mt * a.x + 3 * mt * mt * t * c1.x + 3 * mt * t * t * c2.x + t * t * t * b.x, y: mt * mt * mt * a.y + 3 * mt * mt * t * c1.y + 3 * mt * t * t * c2.y + t * t * t * b.y }); } return points; }
       function dxfCurve(layer, points, lineWidth = 0.25) { if (!points || points.length < 2) return ''; const vertices = points.map((point) => `0\nVERTEX\n8\n${layer}\n10\n${dxfNumber(point.x)}\n20\n${dxfNumber(-point.y)}\n30\n0.0\n70\n0\n`).join(''); return `0\nPOLYLINE\n8\n${layer}\n66\n1\n10\n0.0\n20\n0.0\n30\n0.0\n40\n${dxfNumber(lineWidth)}\n41\n${dxfNumber(lineWidth)}\n70\n0\n${vertices}0\nSEQEND\n8\n${layer}\n`; }
+      function connectionDxfPoints(connection, a, b) { const fromDirection = connection.from?.vertexId ? connection.from.port : null; const toDirection = connection.to?.vertexId ? connection.to.port : null; return fromDirection || toDirection ? orthogonalRoutePoints(a, b, fromDirection, toDirection) : cubicPoints(a, { x: (a.x + b.x) / 2, y: a.y }, { x: (a.x + b.x) / 2, y: b.y }, b); }
       function dxfLayerTable() {
         const layers = [
-          ['0', 7], ['CABLE_TRUNKS', 8], ['END_POINTS', 4], ['WORK_ZONES', 3], ['SPLICES', 2], ['PATCH_CABLES', 30], ['LABELS', 7],
+          ['0', 7], ['CABLE_TRUNKS', 8], ['END_POINTS', 4], ['ROUTING_VERTICES', 2], ['WORK_ZONES', 3], ['SPLICES', 2], ['PATCH_CABLES', 30], ['LABELS', 7],
           ...COLORS.map((color) => [`TUBE_${color.abb}`, dxfAci(color.abb)]),
           ...COLORS.map((color) => [`FIBER_${color.abb}`, dxfAci(color.abb)])
         ];
@@ -899,14 +985,15 @@
               entities.push(dxfText('LABELS', tubeLabel, side === 'left' ? row.pillX - 10 : row.pillX + L.PILL_W + 10, row.pillCY + 2, 5.5));
               if (sideExpanded(cable, side).includes(tubeIdx)) {
                 for (let strandIdx = 0; strandIdx < info.count; strandIdx += 1) {
-                  const ref = { cableId: cable.id, side, tubeIdx, strandIdx }; const dot = getDotWorld(ref); if (!dot) continue; const start = { x: side === 'left' ? row.pillX : row.pillX + L.PILL_W, y: row.pillCY }; const control1 = { x: (start.x + dot.x) / 2, y: start.y }; const control2 = { x: (start.x + dot.x) / 2, y: dot.y }; const strand = strandInfo(cable, tubeIdx, strandIdx); entities.push(dxfCurve(`FIBER_${strand.color.abb}`, cubicPoints(start, control1, control2, dot))); entities.push(dxfCircle(`FIBER_${strand.color.abb}`, dot.x, dot.y, 3)); entities.push(dxfText('LABELS', strand.label, dot.x + (side === 'left' ? -12 : 12), dot.y + 2, 5));
+                  const ref = { cableId: cable.id, side, tubeIdx, strandIdx }; const dot = getDotWorld(ref); if (!dot) continue; const start = { x: side === 'left' ? row.pillX : row.pillX + L.PILL_W, y: row.pillCY }; const control1 = { x: (start.x + dot.x) / 2, y: start.y }; const control2 = { x: (start.x + dot.x) / 2, y: dot.y }; const strand = strandInfo(cable, tubeIdx, strandIdx); if (connectorConnectionCount(ref) < maxConnectionsForConnector(ref)) entities.push(dxfCurve(`FIBER_${strand.color.abb}`, cubicPoints(start, control1, control2, dot))); entities.push(dxfCircle(`FIBER_${strand.color.abb}`, dot.x, dot.y, 3)); entities.push(dxfText('LABELS', strand.label, dot.x + (side === 'left' ? -12 : 12), dot.y + 2, 5));
                 }
               }
             });
           });
         });
         state.equipment.forEach((equipment) => { const size = equipmentSize(equipment); const width = size.width; const height = size.height; entities.push(dxfRect('END_POINTS', equipment.x, equipment.y, width, height)); entities.push(dxfText('LABELS', equipment.name || 'END-POINT', equipment.x + 12, equipment.y + 22, 10)); entities.push(dxfText('LABELS', `${equipment.building || 'NO BUILDING'} · ${equipmentTotalPorts(equipment)} PORTS`, equipment.x + 12, equipment.y + 38, 6)); const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right']; sides.forEach((side) => { for (let index = 0; index < equipment.ports; index += 1) { const ref = { equipmentId: equipment.id, side, tubeIdx: 0, strandIdx: index }; const point = getDotWorld(ref); if (!point) continue; entities.push(dxfCircle('END_POINTS', point.x, point.y, 4)); entities.push(dxfText('LABELS', equipment.portLabels?.[index] || `P-${index + 1}`, point.x + (side === 'left' ? 10 : -10), point.y + 2, 5)); } }); });
-        state.connections.forEach((connection) => { const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return; const control1 = { x: (a.x + b.x) / 2, y: a.y }; const control2 = { x: (a.x + b.x) / 2, y: b.y }; entities.push(dxfCurve(connection.type === 'patch' ? 'PATCH_CABLES' : 'SPLICES', cubicPoints(a, control1, control2, b))); if (connection.circuitName) entities.push(dxfText('LABELS', connection.circuitName, (a.x + b.x) / 2, (a.y + b.y) / 2 - 5, 6)); });
+         state.vertices.forEach((vertex) => { const size = clamp(num(vertex.size, VERTEX_SIZE), 14, 80); entities.push(dxfCircle('ROUTING_VERTICES', vertex.x, vertex.y, size / 2)); entities.push(dxfText('LABELS', vertex.label || '90 DEG BEND', vertex.x - 18, vertex.y + 3, 5)); });
+         state.connections.forEach((connection) => { const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return; entities.push(dxfCurve(connection.type === 'patch' ? 'PATCH_CABLES' : 'SPLICES', connectionDxfPoints(connection, a, b))); if (connection.circuitName) entities.push(dxfText('LABELS', connection.circuitName, (a.x + b.x) / 2, (a.y + b.y) / 2 - 5, 6)); });
         const dxf = `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n${dxfLayerTable()}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${entities.join('')}0\nENDSEC\n0\nEOF\n`;
         const blob = new Blob([dxf], { type: 'application/dxf' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${(state.projectName || 'fiber-splice-project').replace(/[^a-z0-9_-]+/gi, '_')}.dxf`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); saveStateLabel('DXF exported'); showToast('DXF file exported.');
       }
@@ -927,7 +1014,7 @@
         clone.setAttribute('viewBox', `${viewX} ${viewY} ${viewWidth} ${viewHeight}`);
         const clonedWorld = clone.querySelector('#world');
         if (clonedWorld) clonedWorld.setAttribute('transform', 'translate(0 0) scale(1)');
-        clone.querySelectorAll('.connection-hit, .strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .tube-row-hit').forEach((element) => element.remove());
+        clone.querySelectorAll('.connection-hit, .strand-hit, .strand-line-hit, .strand-area-hit, .equipment-port-hit, .vertex-port-hit, .tube-row-hit').forEach((element) => element.remove());
         clone.querySelectorAll('.legend-resize-handle, .workzone-resize-handle, .equipment-resize-handle').forEach((element) => element.remove());
         clone.querySelector('#previewLayer')?.replaceChildren();
         const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -940,6 +1027,7 @@
         printStyle.textContent = `.cable-trunk{fill:#f2f3f4!important;stroke:#111827!important;stroke-width:3px!important;filter:none!important}.trunk-lines{opacity:.08!important}.trunk-location{fill:#111827!important;font:16px Arial,sans-serif;letter-spacing:.18em;text-anchor:middle}.trunk-name{fill:#111827!important;font:700 18px Arial,sans-serif;text-anchor:middle}.trunk-cable-display{fill:#111827!important;font:700 16px Arial,sans-serif;text-anchor:middle}.trunk-meta{fill:#334155!important;font:700 18px Arial,sans-serif;letter-spacing:.08em;text-anchor:middle}.trunk-end-box{fill:#ffffff!important;stroke:#374151!important;stroke-width:1.2px}.trunk-end-caption{fill:#334155!important;font:700 7px Arial,sans-serif;letter-spacing:.16em;text-anchor:middle}.trunk-end-value{fill:#111827!important;font:700 9px Arial,sans-serif;text-anchor:middle}.tube-label{fill:#111827!important;font:8px monospace}.strand-label{fill:#111827!important;font:7px monospace}.port-label{fill:#111827!important;font:8px monospace}.node-title{fill:#111827!important;font:700 12px Arial,sans-serif}.node-subtitle{fill:#334155!important;font:8px Arial,sans-serif}.node-card{fill:#ffffff!important;stroke:#374151!important;stroke-width:2px;filter:none!important}.node-port{fill:#ffffff!important;stroke:#374151!important}.workzone{fill:#ffffff!important;stroke:#4b5563!important;stroke-dasharray:7 5}.workzone-title{fill:#111827!important;font:700 12px Arial,sans-serif}.workzone-description{fill:#334155!important;font:9px Arial,sans-serif}.connection-line{fill:none;stroke:#334155!important;stroke-width:1.5px;stroke-opacity:1!important;filter:none!important}.connection-line.selected{stroke:#111827!important;filter:none!important}.connection-hit,.strand-hit,.strand-line-hit,.strand-area-hit,.equipment-port-hit,.tube-row-hit{display:none!important}.fan-line{fill:none;stroke-opacity:.85!important}.strand-dot{stroke:#111827!important;filter:none!important}.tube-pill{stroke:#111827!important}.canvas-help,.canvas-mode{display:none!important}`;
         printStyle.appendChild(document.createTextNode('.connection-line.patch{stroke:#d55b00!important;stroke-dasharray:8 4}'));
         printStyle.appendChild(document.createTextNode('.node-card{fill:#dff3ff!important;stroke:#168fc4!important;stroke-width:2px!important}.legend-card{fill:#eef9ff!important;stroke:#168fc4!important;stroke-width:2px!important}.legend-header{fill:#d9f1ff!important}.legend-title{fill:#111827!important;font:700 12px Arial,sans-serif}.legend-row-label{fill:#111827!important;font:9px monospace}.legend-swatch{stroke:#374151!important}.legend-resize-handle{display:none!important}'));
+        printStyle.appendChild(document.createTextNode('.route-vertex{fill:#fff7ed!important;stroke:#b45309!important;stroke-width:2px;filter:none!important}.route-vertex-label{fill:#92400e!important}.route-vertex-port{fill:#b45309!important;stroke:#fff!important}'));
         clone.insertBefore(printStyle, clone.firstChild);
         const svgBlob = new Blob([new XMLSerializer().serializeToString(clone)], { type: 'image/svg+xml;charset=utf-8' });
         const svgUrl = URL.createObjectURL(svgBlob);
@@ -965,6 +1053,7 @@
         const next = blankState(String(raw.projectName || raw.name || 'Untitled Project'));
         next.viewport = { x: num(raw.viewport?.x), y: num(raw.viewport?.y), zoom: clamp(num(raw.viewport?.zoom, 1), .12, 3.5) };
         if (Array.isArray(raw.equipment)) next.equipment = raw.equipment.map((e) => ({ id: String(e.id || id('equipment')), kind: e.kind === 'equipment' || e.type === 'equipment' ? 'equipment' : 'endpoint', name: String(e.name || (e.kind === 'equipment' ? 'EQUIPMENT' : 'END-POINT')), building: String(e.building || ''), ports: clamp(Math.round(num(e.ports, 8)), 1, 64), portLabels: Array.isArray(e.portLabels) ? e.portLabels.map(String) : [], x: num(e.x), y: num(e.y), width: num(e.width, 230), height: num(e.height, 54 + clamp(Math.round(num(e.ports, 8)), 1, 64) * 26 + 16), side: e.side === 'both' ? 'both' : e.side === 'left' ? 'left' : 'right' }));
+        if (Array.isArray(raw.vertices)) next.vertices = raw.vertices.map((vertex) => ({ id: String(vertex.id || id('vertex')), label: String(vertex.label || '90° BEND'), size: clamp(num(vertex.size, VERTEX_SIZE), 14, 80), x: num(vertex.x), y: num(vertex.y) }));
         if (Array.isArray(raw.cables) && raw.cables.some((c) => c.fiberCount !== undefined || c.leftExp !== undefined)) next.cables = raw.cables.map((c) => ({ id: String(c.id || id('cable')), name: String(c.name || c.buildingName || 'BUILDING'), cableName: String(c.cableName || c.location || c.legName || 'CABLE'), cableSegment: String(c.cableSegment ?? c.segment ?? c.segmentNumber ?? '1'), to: String(c.to || ''), from: String(c.from || ''), fiberCount: clamp(Math.round(num(c.fiberCount ?? c.strandCount, 48)), 1, 5000), x: num(c.x), y: num(c.y), leftExp: Array.isArray(c.leftExp) ? c.leftExp.map(Number) : [], rightExp: Array.isArray(c.rightExp) ? c.rightExp.map(Number) : [], isCollapsed: Boolean(c.isCollapsed), fromLabelOffset: { x: num(c.fromLabelOffset?.x), y: num(c.fromLabelOffset?.y) }, toLabelOffset: { x: num(c.toLabelOffset?.x), y: num(c.toLabelOffset?.y) } }));
         else if (Array.isArray(raw.nodes) && Array.isArray(raw.cables)) {
           next.equipment = raw.nodes.map((n, i) => ({ id: String(n.id || id('equipment')), kind: 'endpoint', name: String(n.name || `END-POINT-${i + 1}`), building: '', ports: 8, portLabels: [], x: num(n.x), y: num(n.y), side: i % 2 ? 'right' : 'left' }));
