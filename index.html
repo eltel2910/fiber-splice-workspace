@@ -180,7 +180,7 @@
     <header class="topbar">
       <div class="brand"><div class="brand-mark" aria-hidden="true"></div><div class="brand-copy"><div class="brand-title">Fiber Splice Workspace</div><div class="brand-credit">Created By: <a href="https://www.linkedin.com/in/georgegodby/" target="_blank" rel="noopener noreferrer">Joe Godby - linkedin.com/in/georgegodby/</a></div><div class="brand-support"><a href="https://buymeacoffee.com/broadbandengineering" target="_blank" rel="noopener noreferrer">Please Help Support: https://buymeacoffee.com/broadbandengineering</a></div></div></div>
       <input class="project-name" id="projectName" aria-label="Project name" value="Untitled Project" />
-      <div class="top-actions"><button class="button" id="newProjectBtn">New</button><button class="button" id="projectsBtn">Projects</button><button class="button primary" id="exportBtn">Export DXF</button><button class="button" id="jpegBtn">Export JPEG</button></div>
+      <div class="top-actions"><button class="button" id="newProjectBtn">New</button><button class="button" id="projectsBtn">Projects</button><button class="button primary" id="exportBtn">Export DXF</button><button class="button" id="jpegBtn">Export JPEG</button><button class="button" id="csvBtn">Export CSV</button></div>
       <div class="spacer"></div>
       <div class="zoom"><button class="icon-button" id="zoomOutBtn">−</button><span class="zoom-readout" id="zoomReadout">100%</span><button class="icon-button" id="zoomInBtn">+</button><button class="button" id="fitBtn">Fit</button></div>
       <span class="save-state" id="saveState">Local save ready</span>
@@ -575,6 +575,115 @@
         const points = orthogonalRoutePoints(a, b, fromDirection, toDirection); let best = { length: -1, start: a, end: b };
         for (let index = 1; index < points.length; index += 1) { const start = points[index - 1]; const end = points[index]; const length = Math.hypot(end.x - start.x, end.y - start.y); if (length > best.length) best = { length, start, end }; }
         const horizontal = Math.abs(best.end.y - best.start.y) < .01; return { x: (best.start.x + best.end.x) / 2 + (horizontal ? 0 : 7), y: (best.start.y + best.end.y) / 2 + (horizontal ? -6 : 3), anchor: horizontal ? 'middle' : 'start' };
+      }
+
+      function inventoryEndpointGroupKey(ref) {
+        if (ref?.cableId) return `cable:${ref.cableId}:${ref.side}:${ref.tubeIdx}`;
+        if (ref?.equipmentId) return `equipment:${ref.equipmentId}:${ref.side || 'right'}`;
+        if (ref?.vertexId) return `vertex:${ref.vertexId}:${ref.port || 'right'}`;
+        return '';
+      }
+      function inventoryEndpointRank(ref) {
+        if (ref?.equipmentId) return 0;
+        if (ref?.cableId) return 1;
+        if (ref?.vertexId) return 2;
+        return 3;
+      }
+      function inventoryEndpointPosition(ref) {
+        if (ref?.equipmentId) { const equipment = equipmentById(ref.equipmentId); return equipment ? { x: num(equipment.x), y: num(equipment.y) } : { x: 0, y: 0 }; }
+        if (ref?.cableId) { const cable = cableById(ref.cableId); return cable ? { x: num(cable.x), y: num(cable.y) } : { x: 0, y: 0 }; }
+        if (ref?.vertexId) { const vertex = vertexById(ref.vertexId); return vertex ? { x: num(vertex.x), y: num(vertex.y) } : { x: 0, y: 0 }; }
+        return { x: 0, y: 0 };
+      }
+      function inventoryRefSort(a, b) {
+        const rank = inventoryEndpointRank(a) - inventoryEndpointRank(b); if (rank) return rank;
+        const pa = inventoryEndpointPosition(a); const pb = inventoryEndpointPosition(b); if (pa.x !== pb.x) return pa.x - pb.x; if (pa.y !== pb.y) return pa.y - pb.y;
+        if (a?.side !== b?.side) return a?.side === 'left' ? -1 : 1;
+        return num(a?.strandIdx) - num(b?.strandIdx);
+      }
+      function uniqueInventoryValues(values) { return [...new Set(values.map((value) => String(value ?? '').trim()).filter(Boolean))]; }
+      function inventorySide(refs) {
+        const entries = refs.map((ref) => {
+          if (ref?.equipmentId) {
+            const equipment = equipmentById(ref.equipmentId);
+            if (!equipment) return null;
+            return { type: equipment.kind === 'equipment' ? 'Equipment' : 'End Point', name: equipment.name, location: equipment.building, port: equipmentPortLabel(equipment, ref.side, ref.strandIdx), cableSegment: '', tube: '', tubeNumber: '', fibers: '', colors: '', ref };
+          }
+          if (ref?.cableId) {
+            const cable = cableById(ref.cableId);
+            if (!cable) return null;
+            const tube = tubeInfo(cable, ref.tubeIdx); const strand = strandInfo(cable, ref.tubeIdx, ref.strandIdx);
+            return { type: 'Cable', name: cable.cableName || 'CABLE', location: cable.name || '', port: '', cableSegment: `${cable.cableName || 'CABLE'} - ${cable.cableSegment || '1'}`, tube: `Tube ${String(num(ref.tubeIdx) + 1).padStart(2, '0')}`, tubeNumber: String(num(ref.tubeIdx) + 1), tubeLabel: tube.label, fibers: strand.label, colors: strand.color.abb, ref };
+          }
+          if (ref?.vertexId) {
+            const vertex = vertexById(ref.vertexId);
+            return vertex ? { type: 'Vertex', name: vertex.label || '90° routing vertex', location: '', port: ref.port || '', cableSegment: '', tube: '', tubeNumber: '', fibers: '', colors: '', ref } : null;
+          }
+          return null;
+        }).filter(Boolean);
+        return {
+          type: uniqueInventoryValues(entries.map((entry) => entry.type)).join('; '),
+          name: uniqueInventoryValues(entries.map((entry) => entry.name)).join('; '),
+          location: uniqueInventoryValues(entries.map((entry) => entry.location)).join('; '),
+          port: uniqueInventoryValues(entries.map((entry) => entry.port)).join('; '),
+          cableSegment: uniqueInventoryValues(entries.map((entry) => entry.cableSegment)).join('; '),
+          tube: uniqueInventoryValues(entries.map((entry) => entry.tube)).join('; '),
+          tubeNumber: uniqueInventoryValues(entries.map((entry) => entry.tubeNumber)).join('; '),
+          tubeLabel: uniqueInventoryValues(entries.map((entry) => entry.tubeLabel)).join('; '),
+          fibers: uniqueInventoryValues(entries.map((entry) => entry.fibers)).join('; '),
+          colors: uniqueInventoryValues(entries.map((entry) => entry.colors)).join(', '),
+          refs
+        };
+      }
+      function inventoryConnectionDescription(type, from, to) {
+        const fromLocation = from.location ? ` at ${from.location}` : '';
+        const toLocation = to.location ? ` at ${to.location}` : '';
+        const fromPort = from.port ? ` port ${from.port}` : '';
+        const toPort = to.port ? ` port ${to.port}` : '';
+        const fromFibers = from.colors ? ` fibers ${from.colors}` : '';
+        const toFibers = to.colors ? ` fibers ${to.colors}` : '';
+        if (type === 'patch') {
+          if (from.type === 'Equipment' || from.type === 'End Point') return `${from.type}-${from.name}${fromPort} connects to ${to.cableSegment || to.name} fiber${toLocation}${to.tube ? ` on ${to.tube}` : ''}${toFibers}`;
+          if (to.type === 'Equipment' || to.type === 'End Point') return `${to.type}-${to.name}${toPort} connects to ${from.cableSegment || from.name} fiber${fromLocation}${from.tube ? ` on ${from.tube}` : ''}${fromFibers}`;
+        }
+        if (type === 'splice') return `${from.cableSegment || from.name} fiber${fromLocation}${from.tube ? ` on ${from.tube}` : ''}${fromFibers} connects to ${to.cableSegment || to.name} cable${toLocation}${to.tube ? ` on ${to.tube}` : ''}${toFibers}`;
+        return `${from.type}-${from.name}${fromPort}${fromLocation} connects to ${to.type}-${to.name}${toPort}${toLocation}`;
+      }
+      function buildCircuitInventoryRows() {
+        const graph = buildCircuitGraph();
+        const groups = new Map();
+        state.connections.forEach((connection) => {
+          const circuitName = circuitNameForConnection(connection, graph) || connection.circuitName || 'Unassigned circuit';
+          const refs = [connection.from, connection.to].sort(inventoryRefSort);
+          const key = [circuitName, connection.type || 'splice', inventoryEndpointGroupKey(refs[0]), inventoryEndpointGroupKey(refs[1])].join('|');
+          if (!groups.has(key)) groups.set(key, { circuitName, type: connection.type === 'patch' ? 'patch' : 'splice', refs: [[], []], connections: [] });
+          const group = groups.get(key); group.refs[0].push(refs[0]); group.refs[1].push(refs[1]); group.connections.push(connection);
+        });
+        const rows = [...groups.values()].map((group) => {
+          const from = inventorySide(group.refs[0]); const to = inventorySide(group.refs[1]);
+          const positions = group.refs.flat().map((ref) => inventoryEndpointPosition(ref).x);
+          return { circuitName: group.circuitName, type: group.type, from, to, fiberCount: group.connections.length, description: inventoryConnectionDescription(group.type, from, to), position: positions.length ? Math.min(...positions) : 0 };
+        });
+        rows.sort((a, b) => a.circuitName.localeCompare(b.circuitName) || a.position - b.position || a.description.localeCompare(b.description));
+        const byCircuit = new Map(); rows.forEach((row) => { if (!byCircuit.has(row.circuitName)) byCircuit.set(row.circuitName, []); byCircuit.get(row.circuitName).push(row); });
+        const ordered = [];
+        byCircuit.forEach((circuitRows) => {
+          const endpointRows = circuitRows.filter((row) => row.from.type.includes('Equipment') || row.from.type.includes('End Point') || row.to.type.includes('Equipment') || row.to.type.includes('End Point'));
+          circuitRows.forEach((row, index) => {
+            row.sequence = index + 1;
+            row.recordType = endpointRows[0] === row ? 'START' : endpointRows.length > 1 && endpointRows[endpointRows.length - 1] === row ? 'END' : 'LINK';
+            ordered.push(row);
+          });
+        });
+        return ordered;
+      }
+      function csvEscape(value) { const text = String(value ?? ''); return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; }
+      function exportCircuitCsv() {
+        const headers = ['Project', 'Circuit Name', 'Sequence', 'Record Type', 'Connection Type', 'From Type', 'From Name', 'From Location', 'From Port', 'From Cable Segment', 'From Tube', 'From Fiber(s)', 'To Type', 'To Name', 'To Location', 'To Port', 'To Cable Segment', 'To Tube', 'To Fiber(s)', 'Fiber Count', 'Description'];
+        const rows = buildCircuitInventoryRows();
+        const values = rows.map((row) => [state.projectName || 'Untitled Project', row.circuitName, row.sequence, row.recordType, row.type === 'patch' ? 'Patch cable' : 'Fiber splice', row.from.type, row.from.name, row.from.location, row.from.port, row.from.cableSegment, row.from.tube, row.from.fibers, row.to.type, row.to.name, row.to.location, row.to.port, row.to.cableSegment, row.to.tube, row.to.fibers, row.fiberCount, row.recordType === 'START' ? `Starts - ${row.description}` : row.description]);
+        const csv = `\uFEFF${[headers, ...values].map((row) => row.map(csvEscape).join(',')).join('\r\n')}\r\n`;
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${(state.projectName || 'fiber-splice-project').replace(/[^a-z0-9_-]+/gi, '_')}-circuit-inventory.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); saveStateLabel('Circuit inventory CSV exported'); showToast(`${rows.length} circuit inventory row${rows.length === 1 ? '' : 's'} exported.`);
       }
 
       function setTool(next) {
@@ -1132,6 +1241,7 @@
       $('#projectsBtn').addEventListener('click', openProjects);
       $('#exportBtn').addEventListener('click', exportDxf);
       $('#jpegBtn').addEventListener('click', exportJpeg);
+      $('#csvBtn').addEventListener('click', exportCircuitCsv);
       $('#fitBtn').addEventListener('click', fitView); $('#centerBtn').addEventListener('click', fitView);
       $('#zoomInBtn').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, state.viewport.zoom * 1.15); }); $('#zoomOutBtn').addEventListener('click', () => { const r = canvas.getBoundingClientRect(); zoomAt(r.left + r.width / 2, r.top + r.height / 2, state.viewport.zoom / 1.15); }); $('#deleteBtn').addEventListener('click', deleteSelected); $('#undoBtn').addEventListener('click', undo);
       document.querySelectorAll('[data-tool]').forEach((button) => button.addEventListener('click', () => setTool(button.dataset.tool)));
