@@ -761,6 +761,18 @@
         else { const count = Math.max(1, selectedDots.length); content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Shift-click connectors to select a group, then drag from any selected connector to the matching destination set.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`; $('#disconnectDotBtn').addEventListener('click', disconnectSelected); }
       }
 
+      function cloneSelectedCable() {
+        if (!selected || selected.type !== 'cable') return;
+        const source = cableById(selected.id); if (!source) return;
+        const answer = window.prompt('How many copies of this cable would you like to create?', '1');
+        if (answer === null) return;
+        const count = clamp(Math.floor(num(answer, 1)), 1, 100); recordHistory(); let lastClone = null;
+        for (let index = 0; index < count; index += 1) {
+          const clone = JSON.parse(JSON.stringify(source)); const copyNumber = index + 1; clone.id = id('cable'); clone.name = `${source.name || 'BUILDING'} - COPY ${copyNumber}`; clone.cableName = `${source.cableName || 'CABLE'} - COPY ${copyNumber}`; clone.x = source.x + 80 * ((index % 4) + 1); clone.y = source.y + 70 * (Math.floor(index / 4) + 1); clone.leftExp = [...(source.leftExp || [])]; clone.rightExp = [...(source.rightExp || [])]; clone.fromLabelOffset = { ...(source.fromLabelOffset || { x: 0, y: 0 }) }; clone.toLabelOffset = { ...(source.toLabelOffset || { x: 0, y: 0 }) }; state.cables.push(clone); lastClone = clone;
+        }
+        if (lastClone) { selected = { type: 'cable', id: lastClone.id }; clearDotSelection(); autosave(); render(); showToast(`${count} cable ${count === 1 ? 'copy' : 'copies'} created.`); }
+      }
+
       function renderCableInspector(cable) {
         if (!cable) return;
         const preset = PRESETS.map((n) => `<option value="${n}" ${n === cable.fiberCount ? 'selected' : ''}>${n} fibers</option>`).join('');
@@ -776,6 +788,7 @@
         $('#collapseCable').addEventListener('change', (e) => updateItem('cable', cable.id, 'isCollapsed', e.target.checked));
         $('#expandLeftBtn').addEventListener('click', () => toggleTube(cable.id, 'left', 0));
         $('#expandRightBtn').addEventListener('click', () => toggleTube(cable.id, 'right', 0));
+        const cloneCableButton = document.createElement('button'); cloneCableButton.type = 'button'; cloneCableButton.className = 'button'; cloneCableButton.id = 'cloneCableBtn'; cloneCableButton.textContent = 'Clone cable…'; $('#deleteSelected').parentElement.insertBefore(cloneCableButton, $('#deleteSelected')); cloneCableButton.addEventListener('click', cloneSelectedCable);
         $('#deleteSelected').addEventListener('click', deleteSelected);
       }
 
