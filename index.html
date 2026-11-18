@@ -286,6 +286,8 @@
       const undoStack = [];
       let historySuspended = false;
       const MAGNET_RADIUS_PX = 42;
+      const MAX_CABLE_STRAND_CONNECTIONS = 2;
+      const MAX_EQUIPMENT_PORT_CONNECTIONS = 1;
 
       function blankState(name) { return { version: 4, projectName: name, viewport: { x: 0, y: 0, zoom: 1 }, cables: [], equipment: [], connections: [], workZones: [], legends: [] }; }
       function id(prefix) { return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`; }
@@ -381,8 +383,20 @@
         render();
         if (window.innerWidth <= 760) $('#inspector').classList.add('open');
       }
-      function dotAlreadyConnected(ref) { return state.connections.some((c) => refsEqual(c.from, ref) || refsEqual(c.to, ref)); }
-
+      function connectorConnectionCount(ref, excludedConnectionId = null) {
+        return state.connections.reduce((count, connection) => {
+          if (excludedConnectionId && connection.id === excludedConnectionId) return count;
+          return count + (refsEqual(connection.from, ref) || refsEqual(connection.to, ref) ? 1 : 0);
+        }, 0);
+      }
+      function maxConnectionsForConnector(ref) { return ref?.cableId ? MAX_CABLE_STRAND_CONNECTIONS : MAX_EQUIPMENT_PORT_CONNECTIONS; }
+      function connectorAtCapacity(ref) { return connectorConnectionCount(ref) >= maxConnectionsForConnector(ref); }
+      function connectionExists(a, b) {
+        return state.connections.some((connection) => (
+          (refsEqual(connection.from, a) && refsEqual(connection.to, b)) ||
+          (refsEqual(connection.from, b) && refsEqual(connection.to, a))
+        ));
+      }
       function visibleDotRefs() {
         const refs = [];
         state.cables.forEach((cable) => {
@@ -407,7 +421,7 @@
         let nearestDistance = Infinity;
         const radiusWorld = (tool === 'patch' ? MAGNET_RADIUS_PX * 1.35 : MAGNET_RADIUS_PX) / state.viewport.zoom;
         visibleDotRefs().forEach((candidate) => {
-          if (refsEqual(candidate, source) || dotAlreadyConnected(candidate)) return;
+          if (refsEqual(candidate, source) || connectorAtCapacity(candidate) || connectionExists(source, candidate)) return;
           if (tool === 'patch' && ((source.equipmentId && !candidate.cableId) || (source.cableId && !candidate.equipmentId))) return;
           const candidatePoint = getDotWorld(candidate);
           if (!candidatePoint) return;
@@ -434,7 +448,7 @@
         if (sources.length === 1) return [anchorTarget];
         const sourcePoint = getDotWorld(draggedSource); const targetPoint = getDotWorld(anchorTarget);
         if (!sourcePoint || !targetPoint) return null;
-        const candidates = visibleDotRefs().filter((candidate) => sameDotSet(candidate, anchorTarget) && !dotAlreadyConnected(candidate) && !sources.some((source) => refsEqual(source, candidate)));
+        const candidates = visibleDotRefs().filter((candidate) => sameDotSet(candidate, anchorTarget) && !connectorAtCapacity(candidate) && !sources.some((source) => refsEqual(source, candidate)));
         const used = new Set(); const targets = [];
         const radiusWorld = MAGNET_RADIUS_PX * 1.8 / state.viewport.zoom;
         for (const source of sources) {
@@ -442,7 +456,7 @@
           let nearest = null; let nearestDistance = Infinity;
           if (refsEqual(source, draggedSource)) nearest = anchorTarget;
           else candidates.forEach((candidate) => {
-            if (used.has(dotKey(candidate)) || refsEqual(candidate, anchorTarget) || !validConnectionPair(source, candidate)) return;
+            if (used.has(dotKey(candidate)) || refsEqual(candidate, anchorTarget) || connectionExists(source, candidate) || !validConnectionPair(source, candidate)) return;
             const candidatePoint = getDotWorld(candidate); if (!candidatePoint) return;
             const distance = Math.hypot(candidatePoint.x - desired.x, candidatePoint.y - desired.y);
             if (distance <= radiusWorld && distance < nearestDistance) { nearest = candidate; nearestDistance = distance; }
@@ -623,12 +637,13 @@
           if (expanded.includes(tubeIdx)) {
             const blockTop = y + L.STRAND_PAD; const dotX = isLeft ? pillX - L.FAN_GAP : pillX + L.PILL_W + L.FAN_GAP;
             for (let strandIdx = 0; strandIdx < info.count; strandIdx += 1) {
-              const strand = strandInfo(cable, tubeIdx, strandIdx); const dotY = blockTop + strandIdx * L.STRAND_STEP + L.STRAND_STEP / 2; const startX = isLeft ? pillX : pillX + L.PILL_W; const cp = (startX + dotX) / 2; const refPreview = { cableId: cable.id, side, tubeIdx, strandIdx }; const selectedDot = dotIsSelected(refPreview); const hot = hoverDot && refsEqual(hoverDot, refPreview);
+              const strand = strandInfo(cable, tubeIdx, strandIdx); const dotY = blockTop + strandIdx * L.STRAND_STEP + L.STRAND_STEP / 2; const startX = isLeft ? pillX : pillX + L.PILL_W; const cp = (startX + dotX) / 2; const refPreview = { cableId: cable.id, side, tubeIdx, strandIdx }; const selectedDot = dotIsSelected(refPreview); const hot = hoverDot && refsEqual(hoverDot, refPreview); const hideClosetStrand = connectorConnectionCount(refPreview) >= maxConnectionsForConnector(refPreview);
               const strandPath = `M ${startX} ${pillCY} C ${cp} ${pillCY}, ${cp} ${dotY}, ${dotX} ${dotY}`;
               const strandAreaHit = svgEl('rect', { x: Math.min(startX, dotX) - 24, y: dotY - 10, width: Math.abs(dotX - startX) + 48, height: 20, class: 'strand-area-hit', fill: '#ffffff', opacity: 0, 'pointer-events': 'all', cursor: 'pointer' });
               const strandHit = svgEl('path', { d: strandPath, class: 'strand-line-hit', fill: 'none', stroke: '#ffffff', opacity: 0, 'stroke-width': 18, 'pointer-events': 'all', cursor: 'pointer' });
               const line = svgEl('path', { d: strandPath, class: 'fan-line', stroke: strand.color.hex, 'pointer-events': 'none' });
               const labelX2 = isLeft ? dotX - 10 : dotX + 10; const label2 = svgEl('text', { x: labelX2, y: dotY + 3, class: 'strand-label', 'text-anchor': isLeft ? 'end' : 'start' }); label2.textContent = strand.label;
+              if (hideClosetStrand) { line.setAttribute('display', 'none'); label2.setAttribute('display', 'none'); }
               const ref = { cableId: cable.id, side, tubeIdx, strandIdx };
               const dot = svgEl('circle', { cx: dotX, cy: dotY, r: L.STRAND_R, class: `strand-dot${selectedDot ? ' selected' : ''}${hot ? ' hot' : ''}`, fill: strand.color.hex, 'data-dot-key': dotKey(ref), 'pointer-events': 'all' });
               const hit = svgEl('circle', { cx: dotX, cy: dotY, r: 18, class: 'strand-hit', fill: '#ffffff', opacity: '0', 'pointer-events': 'all' });
@@ -717,6 +732,7 @@
       function startStrandDrag(event, ref) {
         if (event.button !== 0 || (tool !== 'select' && tool !== 'patch')) return;
         if (tool === 'patch' && !ref.equipmentId) { showToast('Start a patch cable from an End Point or Equipment port.', 'error'); return; }
+        if (connectorAtCapacity(ref)) { showToast(`This connector already has its maximum of ${maxConnectionsForConnector(ref)} link${maxConnectionsForConnector(ref) === 1 ? '' : 's'}.`, 'error'); return; }
         event.stopPropagation(); event.preventDefault();
         if (event.shiftKey) { setDotSelection(ref, true); strandDrag = null; return; }
         const sources = dotIsSelected(ref) && selectedDots.length > 1 ? selectedDots.map((item) => ({ ...item })) : [{ ...ref }];
@@ -731,11 +747,14 @@
         if (!strandDrag) return;
         const dragState = strandDrag; const sources = dragState.sources || [dragState.from]; const targets = dragState.snapTargets?.length ? dragState.snapTargets : (dragState.snapTarget ? [dragState.snapTarget] : []); const isPatch = tool === 'patch'; strandDrag = null;
         if (targets.length !== sources.length || !targets.length) { showToast(sources.length > 1 ? 'Select a complete destination set before releasing.' : (isPatch ? 'Patch cable not connected. Release while the cyan snap ring is visible.' : 'Splice not connected. Release while the cyan snap ring is visible.'), 'error'); render(); return; }
-        const targetKeys = new Set();
+        const targetKeys = new Set(); const pendingCounts = new Map();
+        const pendingCount = (ref) => pendingCounts.get(dotKey(ref)) || 0;
+        const reserve = (ref) => pendingCounts.set(dotKey(ref), pendingCount(ref) + 1);
         for (let index = 0; index < sources.length; index += 1) {
           const source = sources[index]; const target = targets[index];
-          if (!target || refsEqual(source, target) || dotAlreadyConnected(source) || dotAlreadyConnected(target) || targetKeys.has(dotKey(target)) || !validConnectionPair(source, target)) { showToast('One or more selected strands cannot be connected.', 'error'); render(); return; }
+          if (!target || refsEqual(source, target) || connectorConnectionCount(source) + pendingCount(source) >= maxConnectionsForConnector(source) || connectorConnectionCount(target) + pendingCount(target) >= maxConnectionsForConnector(target) || targetKeys.has(dotKey(target)) || connectionExists(source, target) || !validConnectionPair(source, target)) { showToast('One or more selected strands cannot be connected. Cable strand connectors support two links; equipment ports support one.', 'error'); render(); return; }
           targetKeys.add(dotKey(target));
+          reserve(source); reserve(target);
         }
         recordHistory();
         sources.forEach((source, index) => state.connections.push({ id: id('conn'), from: source, to: targets[index], circuitName: '', type: isPatch ? 'patch' : 'splice' }));
@@ -758,7 +777,7 @@
         else if (selected.type === 'workzone') renderWorkzoneInspector(workzoneById(selected.id));
         else if (selected.type === 'legend') renderLegendInspector(legendById(selected.id));
         else if (selected.type === 'connection') renderConnectionInspector(state.connections.find((c) => c.id === selected.id));
-        else { const count = Math.max(1, selectedDots.length); content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Shift-click connectors to select a group, then drag from any selected connector to the matching destination set.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`; $('#disconnectDotBtn').addEventListener('click', disconnectSelected); }
+         else { const count = Math.max(1, selectedDots.length); const used = selected.ref ? connectorConnectionCount(selected.ref) : 0; const limit = selected.ref ? maxConnectionsForConnector(selected.ref) : MAX_CABLE_STRAND_CONNECTIONS; content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Shift-click connectors to select a group, then drag from any selected connector to the matching destination set.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="notice">${used} of ${limit} link${limit === 1 ? '' : 's'} in use. A cable strand can carry an equipment link and a next-cable link.</div><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`; $('#disconnectDotBtn').addEventListener('click', disconnectSelected); }
       }
 
       function cloneSelectedCable() {
