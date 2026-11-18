@@ -296,7 +296,7 @@
       const MAGNET_RADIUS_PX = 42;
       const MAX_CABLE_STRAND_CONNECTIONS = 2;
       const MAX_EQUIPMENT_PORT_CONNECTIONS = 1;
-      const MAX_VERTEX_PORT_CONNECTIONS = 1;
+      const MAX_VERTEX_PORT_CONNECTIONS = 12;
       const VERTEX_PORTS = ['left', 'top', 'right', 'bottom'];
       const VERTEX_SIZE = 22;
       const VERTEX_PORT_GAP = 14;
@@ -381,6 +381,8 @@
         return { x: equipment.x + (ref.side === 'left' ? -13 : width + 13), y };
       }
       function vertexPortOffset(vertex, port) { const half = clamp(num(vertex?.size, VERTEX_SIZE), 14, 80) / 2; if (port === 'left') return { x: -half - VERTEX_PORT_GAP, y: 0 }; if (port === 'right') return { x: half + VERTEX_PORT_GAP, y: 0 }; if (port === 'top') return { x: 0, y: -half - VERTEX_PORT_GAP }; return { x: 0, y: half + VERTEX_PORT_GAP }; }
+      function vertexPorts(vertex) { return VERTEX_PORTS.slice(0, clamp(Math.round(num(vertex?.portCount, 4)), 2, VERTEX_PORTS.length)); }
+      function vertexPortCapacity(vertex) { return clamp(Math.round(num(vertex?.fibersPerPort, MAX_VERTEX_PORT_CONNECTIONS)), 1, 144); }
       function getVertexDot(vertex, ref) { const offset = vertexPortOffset(vertex, ref.port); return { x: vertex.x + offset.x, y: vertex.y + offset.y }; }
       function getDotWorld(ref) { if (ref.cableId) { const cable = cableById(ref.cableId); return cable ? getCableDot(cable, ref) : null; } if (ref.equipmentId) { const equipment = equipmentById(ref.equipmentId); return equipment ? getEquipmentDot(equipment, ref) : null; } if (ref.vertexId) { const vertex = vertexById(ref.vertexId); return vertex ? getVertexDot(vertex, ref) : null; } return null; }
       function dotKey(ref) { if (ref.cableId) return `c:${ref.cableId}:${ref.side}:${ref.tubeIdx}:${ref.strandIdx}`; if (ref.equipmentId) return `e:${ref.equipmentId}:${ref.side || 'right'}:${ref.strandIdx}`; if (ref.vertexId) return `v:${ref.vertexId}:${ref.port || 'right'}`; return ''; }
@@ -405,7 +407,7 @@
           return count + (refsEqual(connection.from, ref) || refsEqual(connection.to, ref) ? 1 : 0);
         }, 0);
       }
-      function maxConnectionsForConnector(ref) { return ref?.cableId ? MAX_CABLE_STRAND_CONNECTIONS : ref?.vertexId ? MAX_VERTEX_PORT_CONNECTIONS : MAX_EQUIPMENT_PORT_CONNECTIONS; }
+      function maxConnectionsForConnector(ref) { if (ref?.cableId) return MAX_CABLE_STRAND_CONNECTIONS; if (ref?.vertexId) return vertexPortCapacity(vertexById(ref.vertexId)); return MAX_EQUIPMENT_PORT_CONNECTIONS; }
       function connectorAtCapacity(ref) { return connectorConnectionCount(ref) >= maxConnectionsForConnector(ref); }
       function connectionExists(a, b) {
         return state.connections.some((connection) => (
@@ -429,7 +431,7 @@
           const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right'];
           sides.forEach((side) => { for (let strandIdx = 0; strandIdx < equipment.ports; strandIdx += 1) refs.push({ equipmentId: equipment.id, side, tubeIdx: 0, strandIdx }); });
         });
-        state.vertices.forEach((vertex) => VERTEX_PORTS.forEach((port) => refs.push({ vertexId: vertex.id, port })));
+        state.vertices.forEach((vertex) => vertexPorts(vertex).forEach((port) => refs.push({ vertexId: vertex.id, port })));
         return refs;
       }
 
@@ -464,6 +466,10 @@
         const anchorTarget = findMagneticTarget(point, draggedSource);
         if (!anchorTarget) return null;
         if (sources.length === 1) return [anchorTarget];
+        if (anchorTarget.vertexId) {
+          if (connectorConnectionCount(anchorTarget) + sources.length > maxConnectionsForConnector(anchorTarget) || sources.some((source) => refsEqual(source, anchorTarget) || connectionExists(source, anchorTarget) || !validConnectionPair(source, anchorTarget))) return null;
+          return sources.map(() => ({ ...anchorTarget }));
+        }
         const sourcePoint = getDotWorld(draggedSource); const targetPoint = getDotWorld(anchorTarget);
         if (!sourcePoint || !targetPoint) return null;
         const candidates = visibleDotRefs().filter((candidate) => sameDotSet(candidate, anchorTarget) && !connectorAtCapacity(candidate) && !sources.some((source) => refsEqual(source, candidate)));
@@ -724,10 +730,10 @@
         const group = svgEl('g', { transform: `translate(${vertex.x} ${vertex.y})`, 'data-vertex-id': vertex.id });
         group.addEventListener('pointerdown', (event) => startItemDrag(event, 'vertex', vertex.id));
         group.addEventListener('click', (event) => { if (!event.target.closest('.vertex-port-hit')) { event.stopPropagation(); select('vertex', vertex.id); } });
-        const body = svgEl('circle', { cx: 0, cy: 0, r: half, class: `route-vertex${selected?.type === 'vertex' && selected.id === vertex.id ? ' selected' : ''}` });
-        const label = svgEl('text', { x: 0, y: 3, class: 'route-vertex-label' }); label.textContent = '90°';
+        const body = svgEl('rect', { x: -half, y: -half, width: size, height: size, rx: 4, class: `route-vertex${selected?.type === 'vertex' && selected.id === vertex.id ? ' selected' : ''}` });
+        const label = svgEl('text', { x: 0, y: 3, class: 'route-vertex-label' }); label.textContent = (vertex.label || '90°').slice(0, 4);
         group.append(body, label);
-        VERTEX_PORTS.forEach((port) => {
+        vertexPorts(vertex).forEach((port) => {
           const offset = vertexPortOffset(vertex, port); const ref = { vertexId: vertex.id, port }; const connected = connectorConnectionCount(ref) > 0; const hot = hoverDot && refsEqual(hoverDot, ref);
           const circle = svgEl('circle', { cx: offset.x, cy: offset.y, r: connected ? 5 : 4, class: `route-vertex-port${hot ? ' hot' : ''}`, fill: connectorColor(ref), 'pointer-events': 'none' });
           const hit = svgEl('circle', { cx: offset.x, cy: offset.y, r: 13, class: 'vertex-port-hit' });
@@ -827,8 +833,8 @@
         const reserve = (ref) => pendingCounts.set(dotKey(ref), pendingCount(ref) + 1);
         for (let index = 0; index < sources.length; index += 1) {
           const source = sources[index]; const target = targets[index];
-          if (!target || refsEqual(source, target) || connectorConnectionCount(source) + pendingCount(source) >= maxConnectionsForConnector(source) || connectorConnectionCount(target) + pendingCount(target) >= maxConnectionsForConnector(target) || targetKeys.has(dotKey(target)) || connectionExists(source, target) || !validConnectionPair(source, target)) { showToast('One or more selected strands cannot be connected. Cable strand connectors support two links; equipment ports support one.', 'error'); render(); return; }
-          targetKeys.add(dotKey(target));
+          if (!target || refsEqual(source, target) || connectorConnectionCount(source) + pendingCount(source) >= maxConnectionsForConnector(source) || connectorConnectionCount(target) + pendingCount(target) >= maxConnectionsForConnector(target) || (targetKeys.has(dotKey(target)) && !target.vertexId) || connectionExists(source, target) || !validConnectionPair(source, target)) { showToast('One or more selected strands cannot be connected. Cable strand connectors support two links; equipment ports support one; vertex bundle ports accept multiple fibers.', 'error'); render(); return; }
+          if (!target.vertexId) targetKeys.add(dotKey(target));
           reserve(source); reserve(target);
         }
         recordHistory();
@@ -838,16 +844,16 @@
 
       function createCable(x, y) { recordHistory(); const cable = { id: id('cable'), name: `BUILDING-${state.cables.length + 1}`, cableName: `CABLE-${state.cables.length + 1}`, cableSegment: '1', to: '', from: '', fiberCount: 48, x: x - 190, y: y - 220, leftExp: [], rightExp: [], isCollapsed: false, fromLabelOffset: { x: 0, y: 0 }, toLabelOffset: { x: 0, y: 0 } }; state.cables.push(cable); select('cable', cable.id); autosave(); }
       function createEquipment(x, y, kind = 'endpoint') { recordHistory(); const count = state.equipment.filter((item) => (item.kind || 'endpoint') === kind).length + 1; const equipment = { id: id('equipment'), kind, name: `${kind === 'equipment' ? 'EQUIPMENT' : 'END-POINT'}-${count}`, building: '', ports: 8, portLabels: [], width: 230, height: 54 + 8 * 26 + 16, x: x - 115, y: y - 80, side: 'right' }; state.equipment.push(equipment); select('equipment', equipment.id); autosave(); }
-      function createVertex(x, y) { recordHistory(); const vertex = { id: id('vertex'), label: '90° BEND', size: VERTEX_SIZE, x, y }; state.vertices.push(vertex); select('vertex', vertex.id); autosave(); }
+      function createVertex(x, y) { recordHistory(); const vertex = { id: id('vertex'), label: '90° BEND', size: VERTEX_SIZE, portCount: 4, fibersPerPort: MAX_VERTEX_PORT_CONNECTIONS, x, y }; state.vertices.push(vertex); select('vertex', vertex.id); autosave(); }
       function createWorkzone(x, y) { recordHistory(); const zone = { id: id('zone'), x: x - 160, y: y - 90, width: 320, height: 180, label: 'WORK ZONE', description: 'Add notes in the inspector' }; state.workZones.push(zone); select('workzone', zone.id); autosave(); }
       function createLegend(x, y) { recordHistory(); const legend = { id: id('legend'), x: x - 115, y: y - 110, width: 230, height: 220, title: 'DIAGRAM LEGEND' }; state.legends.push(legend); select('legend', legend.id); autosave(); }
 
-      function updateItem(type, idValue, field, value) { const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'vertex' ? vertexById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); if (field === 'fiberCount') item.fiberCount = clamp(Math.round(num(value, 12)), 1, 5000); else if (field === 'ports') { item.ports = clamp(Math.round(num(value, 8)), 1, 64); item.portLabels = (item.portLabels || []).slice(0, item.ports); } else if (field === 'width' || field === 'height') item[field] = type === 'legend' ? clamp(Math.round(num(value, field === 'width' ? 230 : 300)), field === 'width' ? 180 : 180, field === 'width' ? 900 : 1200) : clamp(Math.round(num(value, 100)), 60, 2000); else if (field === 'size' && type === 'vertex') item.size = clamp(Math.round(num(value, VERTEX_SIZE)), 14, 80); else item[field] = value; autosave(); if (type === 'legend') render(); else if (field === 'fiberCount' || field === 'ports' || field === 'side' || field === 'isCollapsed' || (type === 'vertex' && field === 'size')) render(); else { renderItems(); renderWorkzones(); renderConnections(); }
+      function updateItem(type, idValue, field, value) { const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'vertex' ? vertexById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); if (field === 'fiberCount') item.fiberCount = clamp(Math.round(num(value, 12)), 1, 5000); else if (field === 'ports') { item.ports = clamp(Math.round(num(value, 8)), 1, 64); item.portLabels = (item.portLabels || []).slice(0, item.ports); } else if (field === 'width' || field === 'height') item[field] = type === 'legend' ? clamp(Math.round(num(value, field === 'width' ? 230 : 300)), field === 'width' ? 180 : 180, field === 'width' ? 900 : 1200) : clamp(Math.round(num(value, 100)), 60, 2000); else if (field === 'size' && type === 'vertex') item.size = clamp(Math.round(num(value, VERTEX_SIZE)), 14, 80); else if (field === 'portCount' && type === 'vertex') item.portCount = clamp(Math.round(num(value, 4)), 2, VERTEX_PORTS.length); else if (field === 'fibersPerPort' && type === 'vertex') item.fibersPerPort = clamp(Math.round(num(value, MAX_VERTEX_PORT_CONNECTIONS)), 1, 144); else item[field] = value; autosave(); if (type === 'legend') render(); else if (field === 'fiberCount' || field === 'ports' || field === 'side' || field === 'isCollapsed' || (type === 'vertex' && ['size', 'portCount', 'fibersPerPort'].includes(field))) render(); else { renderItems(); renderWorkzones(); renderConnections(); }
       }
 
       function renderInspector() {
         const content = $('#inspectorContent');
-        if (!selected || (selected.type === 'dot' && !selected.ref)) { content.innerHTML = `<h2>Workspace</h2><p class="sub">A local-first fiber splice diagram editor based on the supplied workspace concept.</p><div class="notice">Place a cable, end point, or Vertex from the toolbar. A Vertex provides four snap ports for clean 90-degree cable routing.</div><div class="section"><h3>Browser storage</h3><div class="meta-grid"><div class="meta-card"><div class="k">Project</div><div class="v">${esc(state.projectName)}</div></div><div class="meta-card"><div class="k">Items</div><div class="v">${state.cables.length + state.equipment.length + state.vertices.length + state.workZones.length}</div></div></div><div class="button-row" style="margin-top:10px"><button class="button" id="saveNowBtn">Save locally</button><button class="button" id="showProjectsBtn">Project list</button></div></div><div class="section"><h3>Current tool</h3><p class="sub">${tool === 'cable' ? 'Click the canvas to place a cable.' : tool === 'equipment' ? 'Click the canvas to place an end point.' : tool === 'vertex' ? 'Click the canvas to place a 90-degree routing vertex.' : tool === 'workzone' ? 'Click the canvas to place a work zone.' : 'Select and drag items. Use middle/right drag to pan.'}</p></div>`; $('#saveNowBtn')?.addEventListener('click', () => { autosave(); showToast('Saved to this browser.'); }); $('#showProjectsBtn')?.addEventListener('click', openProjects); return; }
+        if (!selected || (selected.type === 'dot' && !selected.ref)) { content.innerHTML = `<h2>Workspace</h2><p class="sub">A local-first fiber splice diagram editor based on the supplied workspace concept.</p><div class="notice">Place a cable, end point, or Vertex from the toolbar. A Vertex provides configurable bundle ports for clean 90-degree cable routing.</div><div class="section"><h3>Browser storage</h3><div class="meta-grid"><div class="meta-card"><div class="k">Project</div><div class="v">${esc(state.projectName)}</div></div><div class="meta-card"><div class="k">Items</div><div class="v">${state.cables.length + state.equipment.length + state.vertices.length + state.workZones.length}</div></div></div><div class="button-row" style="margin-top:10px"><button class="button" id="saveNowBtn">Save locally</button><button class="button" id="showProjectsBtn">Project list</button></div></div><div class="section"><h3>Current tool</h3><p class="sub">${tool === 'cable' ? 'Click the canvas to place a cable.' : tool === 'equipment' ? 'Click the canvas to place an end point.' : tool === 'vertex' ? 'Click the canvas to place a 90-degree routing vertex.' : tool === 'workzone' ? 'Click the canvas to place a work zone.' : 'Select and drag items. Use middle/right drag to pan.'}</p></div>`; $('#saveNowBtn')?.addEventListener('click', () => { autosave(); showToast('Saved to this browser.'); }); $('#showProjectsBtn')?.addEventListener('click', openProjects); return; }
         if (selected.type === 'cable') renderCableInspector(cableById(selected.id));
         else if (selected.type === 'equipment') renderEquipmentInspector(equipmentById(selected.id));
         else if (selected.type === 'vertex') renderVertexInspector(vertexById(selected.id));
@@ -871,8 +877,10 @@
 
       function renderVertexInspector(vertex) {
         if (!vertex) return;
-        $('#inspectorContent').innerHTML = `<h2>90° routing vertex</h2><p class="sub">Use this bend point to route a connection between rows. Connect to one or more of its four snap ports; links touching the vertex use 90-degree turns.</p><div class="field"><label>Label</label><input id="vertexLabel" value="${esc(vertex.label || '90° BEND')}"></div><div class="field"><label>Size</label><input id="vertexSize" type="number" min="14" max="80" value="${clamp(num(vertex.size, VERTEX_SIZE), 14, 80)}"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Ports</div><div class="v">4 snap ports</div></div><div class="meta-card"><div class="k">Links / port</div><div class="v">1</div></div></div></div><div class="section"><button class="button danger" id="deleteSelected">Delete vertex</button></div>`;
+        $('#inspectorContent').innerHTML = `<h2>90° routing vertex</h2><p class="sub">Use this square bundle connector to route fibers between rows. Select multiple cable strands, then drag them to one vertex port.</p><div class="field"><label>Label</label><input id="vertexLabel" value="${esc(vertex.label || '90° BEND')}"></div><div class="field-row"><div class="field"><label>Ports</label><input id="vertexPortCount" type="number" min="2" max="4" value="${vertexPorts(vertex).length}"></div><div class="field"><label>Fibers / port</label><input id="vertexFibersPerPort" type="number" min="1" max="144" value="${vertexPortCapacity(vertex)}"></div></div><div class="field"><label>Size</label><input id="vertexSize" type="number" min="14" max="80" value="${clamp(num(vertex.size, VERTEX_SIZE), 14, 80)}"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Snap ports</div><div class="v">${vertexPorts(vertex).length}</div></div><div class="meta-card"><div class="k">Links / port</div><div class="v">${vertexPortCapacity(vertex)}</div></div></div></div><div class="section"><button class="button danger" id="deleteSelected">Delete vertex</button></div>`;
         $('#vertexLabel').addEventListener('input', (e) => updateItem('vertex', vertex.id, 'label', e.target.value));
+        $('#vertexPortCount').addEventListener('change', (e) => updateItem('vertex', vertex.id, 'portCount', e.target.value));
+        $('#vertexFibersPerPort').addEventListener('change', (e) => updateItem('vertex', vertex.id, 'fibersPerPort', e.target.value));
         $('#vertexSize').addEventListener('change', (e) => updateItem('vertex', vertex.id, 'size', e.target.value));
         $('#deleteSelected').addEventListener('click', deleteSelected);
       }
@@ -992,7 +1000,7 @@
           });
         });
         state.equipment.forEach((equipment) => { const size = equipmentSize(equipment); const width = size.width; const height = size.height; entities.push(dxfRect('END_POINTS', equipment.x, equipment.y, width, height)); entities.push(dxfText('LABELS', equipment.name || 'END-POINT', equipment.x + 12, equipment.y + 22, 10)); entities.push(dxfText('LABELS', `${equipment.building || 'NO BUILDING'} · ${equipmentTotalPorts(equipment)} PORTS`, equipment.x + 12, equipment.y + 38, 6)); const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right']; sides.forEach((side) => { for (let index = 0; index < equipment.ports; index += 1) { const ref = { equipmentId: equipment.id, side, tubeIdx: 0, strandIdx: index }; const point = getDotWorld(ref); if (!point) continue; entities.push(dxfCircle('END_POINTS', point.x, point.y, 4)); entities.push(dxfText('LABELS', equipment.portLabels?.[index] || `P-${index + 1}`, point.x + (side === 'left' ? 10 : -10), point.y + 2, 5)); } }); });
-         state.vertices.forEach((vertex) => { const size = clamp(num(vertex.size, VERTEX_SIZE), 14, 80); entities.push(dxfCircle('ROUTING_VERTICES', vertex.x, vertex.y, size / 2)); entities.push(dxfText('LABELS', vertex.label || '90 DEG BEND', vertex.x - 18, vertex.y + 3, 5)); });
+         state.vertices.forEach((vertex) => { const size = clamp(num(vertex.size, VERTEX_SIZE), 14, 80); entities.push(dxfRect('ROUTING_VERTICES', vertex.x - size / 2, vertex.y - size / 2, size, size)); entities.push(dxfText('LABELS', vertex.label || '90 DEG BEND', vertex.x - 18, vertex.y + 3, 5)); });
          state.connections.forEach((connection) => { const a = getDotWorld(connection.from); const b = getDotWorld(connection.to); if (!a || !b) return; entities.push(dxfCurve(connection.type === 'patch' ? 'PATCH_CABLES' : 'SPLICES', connectionDxfPoints(connection, a, b))); if (connection.circuitName) entities.push(dxfText('LABELS', connection.circuitName, (a.x + b.x) / 2, (a.y + b.y) / 2 - 5, 6)); });
         const dxf = `0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1009\n0\nENDSEC\n0\nSECTION\n2\nTABLES\n${dxfLayerTable()}0\nENDSEC\n0\nSECTION\n2\nENTITIES\n${entities.join('')}0\nENDSEC\n0\nEOF\n`;
         const blob = new Blob([dxf], { type: 'application/dxf' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${(state.projectName || 'fiber-splice-project').replace(/[^a-z0-9_-]+/gi, '_')}.dxf`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); saveStateLabel('DXF exported'); showToast('DXF file exported.');
@@ -1053,7 +1061,7 @@
         const next = blankState(String(raw.projectName || raw.name || 'Untitled Project'));
         next.viewport = { x: num(raw.viewport?.x), y: num(raw.viewport?.y), zoom: clamp(num(raw.viewport?.zoom, 1), .12, 3.5) };
         if (Array.isArray(raw.equipment)) next.equipment = raw.equipment.map((e) => ({ id: String(e.id || id('equipment')), kind: e.kind === 'equipment' || e.type === 'equipment' ? 'equipment' : 'endpoint', name: String(e.name || (e.kind === 'equipment' ? 'EQUIPMENT' : 'END-POINT')), building: String(e.building || ''), ports: clamp(Math.round(num(e.ports, 8)), 1, 64), portLabels: Array.isArray(e.portLabels) ? e.portLabels.map(String) : [], x: num(e.x), y: num(e.y), width: num(e.width, 230), height: num(e.height, 54 + clamp(Math.round(num(e.ports, 8)), 1, 64) * 26 + 16), side: e.side === 'both' ? 'both' : e.side === 'left' ? 'left' : 'right' }));
-        if (Array.isArray(raw.vertices)) next.vertices = raw.vertices.map((vertex) => ({ id: String(vertex.id || id('vertex')), label: String(vertex.label || '90° BEND'), size: clamp(num(vertex.size, VERTEX_SIZE), 14, 80), x: num(vertex.x), y: num(vertex.y) }));
+        if (Array.isArray(raw.vertices)) next.vertices = raw.vertices.map((vertex) => ({ id: String(vertex.id || id('vertex')), label: String(vertex.label || '90° BEND'), size: clamp(num(vertex.size, VERTEX_SIZE), 14, 80), portCount: clamp(Math.round(num(vertex.portCount, 4)), 2, VERTEX_PORTS.length), fibersPerPort: clamp(Math.round(num(vertex.fibersPerPort, MAX_VERTEX_PORT_CONNECTIONS)), 1, 144), x: num(vertex.x), y: num(vertex.y) }));
         if (Array.isArray(raw.cables) && raw.cables.some((c) => c.fiberCount !== undefined || c.leftExp !== undefined)) next.cables = raw.cables.map((c) => ({ id: String(c.id || id('cable')), name: String(c.name || c.buildingName || 'BUILDING'), cableName: String(c.cableName || c.location || c.legName || 'CABLE'), cableSegment: String(c.cableSegment ?? c.segment ?? c.segmentNumber ?? '1'), to: String(c.to || ''), from: String(c.from || ''), fiberCount: clamp(Math.round(num(c.fiberCount ?? c.strandCount, 48)), 1, 5000), x: num(c.x), y: num(c.y), leftExp: Array.isArray(c.leftExp) ? c.leftExp.map(Number) : [], rightExp: Array.isArray(c.rightExp) ? c.rightExp.map(Number) : [], isCollapsed: Boolean(c.isCollapsed), fromLabelOffset: { x: num(c.fromLabelOffset?.x), y: num(c.fromLabelOffset?.y) }, toLabelOffset: { x: num(c.toLabelOffset?.x), y: num(c.toLabelOffset?.y) } }));
         else if (Array.isArray(raw.nodes) && Array.isArray(raw.cables)) {
           next.equipment = raw.nodes.map((n, i) => ({ id: String(n.id || id('equipment')), kind: 'endpoint', name: String(n.name || `END-POINT-${i + 1}`), building: '', ports: 8, portLabels: [], x: num(n.x), y: num(n.y), side: i % 2 ? 'right' : 'left' }));
