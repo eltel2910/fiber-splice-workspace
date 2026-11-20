@@ -598,7 +598,7 @@
         }
         const candidates = equipmentRefs.map((ref) => { const equipment = equipmentById(ref.equipmentId); return { ref, equipment, label: equipment ? equipmentPortLabel(equipment, ref.side, ref.strandIdx) : '' }; }).filter((candidate) => candidate.equipment && candidate.label);
         candidates.sort((a, b) => { const x = num(a.equipment.x) - num(b.equipment.x); if (x) return x; if (a.ref.side !== b.ref.side) return a.ref.side === 'left' ? -1 : 1; return num(a.ref.strandIdx) - num(b.ref.strandIdx); });
-        return candidates[0]?.label || connection.circuitName || '';
+        return connection.circuitName || candidates[0]?.label || '';
       }
       function circuitLabelPosition(connection, a, b) {
         const fromDirection = connection.from?.vertexId ? connection.from.port : null; const toDirection = connection.to?.vertexId ? connection.to.port : null;
@@ -1001,9 +1001,9 @@
       function startStrandDrag(event, ref) {
         if (event.button !== 0 || (tool !== 'select' && tool !== 'patch')) return;
         if (tool === 'patch' && !ref.equipmentId) { showToast('Start a patch cable from an End Point or Equipment port.', 'error'); return; }
+        if (additiveSelection(event)) { strandDrag = null; return; }
         if (connectorAtCapacity(ref)) { showToast(`This connector already has its maximum of ${maxConnectionsForConnector(ref)} link${maxConnectionsForConnector(ref) === 1 ? '' : 's'}.`, 'error'); return; }
         event.stopPropagation(); event.preventDefault();
-        if (additiveSelection(event)) { strandDrag = null; return; }
         const sources = dotIsSelected(ref) && selectedDots.length > 1 ? selectedDots.map((item) => ({ ...item })) : [{ ...ref }];
         if (sources.length === 1) setDotSelection(ref, false);
         else { selected = { type: 'dot', id: dotKey(ref), ref: { ...ref } }; render(); }
@@ -1057,7 +1057,12 @@
         else if (selected.type === 'workzone') renderWorkzoneInspector(workzoneById(selected.id));
         else if (selected.type === 'legend') renderLegendInspector(legendById(selected.id));
         else if (selected.type === 'connection') renderConnectionInspector(state.connections.find((c) => c.id === selected.id));
-         else { const count = Math.max(1, selectedDots.length); const used = selected.ref ? connectorConnectionCount(selected.ref) : 0; const limit = selected.ref ? maxConnectionsForConnector(selected.ref) : MAX_CABLE_STRAND_CONNECTIONS; const connectorHelp = selected.ref?.vertexId ? 'A vertex port accepts one link; use another port on the same vertex to continue the route.' : 'A cable strand can carry an equipment link and a next-cable link.'; content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Shift-click connectors to select a group, then drag from any selected connector to the matching destination set.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="notice">${used} of ${limit} link${limit === 1 ? '' : 's'} in use. ${connectorHelp}</div><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`; $('#disconnectDotBtn').addEventListener('click', disconnectSelected); }
+          else {
+            const count = Math.max(1, selectedDots.length); const used = selected.ref ? connectorConnectionCount(selected.ref) : 0; const limit = selected.ref ? maxConnectionsForConnector(selected.ref) : MAX_CABLE_STRAND_CONNECTIONS; const connectorHelp = selected.ref?.vertexId ? 'A vertex port accepts one link; use another port on the same vertex to continue the route.' : 'A cable strand can carry an equipment link and a next-cable link.'; const selectedConnections = connectionsForRefs(selectedDots.length ? selectedDots : [selected.ref]); const manualNames = [...new Set(selectedConnections.map((connection) => String(connection.circuitName || '').trim()).filter(Boolean))]; const bulkName = manualNames.length === 1 ? manualNames[0] : '';
+            content.innerHTML = `<h2>${count > 1 ? `${count} strands` : 'Strand'}</h2><p class="sub">${count > 1 ? 'Ctrl-click connectors to select a group, then edit or disconnect the selected strands.' : 'Drag from this strand connector to another expanded connector to create a splice.'}</p><div class="notice">${used} of ${limit} link${limit === 1 ? '' : 's'} in use. ${connectorHelp}</div><div class="section"><div class="field"><label>Circuit name override</label><input id="bulkCircuitName" value="${esc(bulkName)}" placeholder="Applied to selected connections" ${selectedConnections.length ? '' : 'disabled'}></div><button class="button" id="applyBulkCircuitName" ${selectedConnections.length ? '' : 'disabled'}>Apply circuit name</button></div><div class="button-row"><button class="button danger" id="disconnectDotBtn">Disconnect${count > 1 ? ' selected' : ''}</button></div>`;
+            $('#applyBulkCircuitName')?.addEventListener('click', applyBulkCircuitName);
+            $('#disconnectDotBtn').addEventListener('click', disconnectSelected);
+          }
       }
 
       function cloneSelectedCable() {
@@ -1120,9 +1125,9 @@
       }
       function renderConnectionInspector(connection) {
         if (!connection) return;
-        const isPatch = connection.type === 'patch'; const directional = connectionTouchesVertex(connection); const title = isPatch ? 'Patch cable' : 'Splice connection'; const description = isPatch ? 'This patch cable links an End Point or Equipment port to an OSP fiber strand.' : 'Circuit names come from the leftmost equipment port label in the connected path.'; const nameLabel = isPatch ? 'Patch cable name' : 'Manual fallback name'; const circuitName = circuitNameForConnection(connection); const direction = connection.direction === 'reverse' ? 'Reverse (To → From)' : 'Forward (From → To)';
+        const isPatch = connection.type === 'patch'; const directional = connectionTouchesVertex(connection); const title = isPatch ? 'Patch cable' : 'Splice connection'; const description = isPatch ? 'This patch cable links an End Point or Equipment port to an OSP fiber strand.' : 'Circuit names default to the leftmost equipment port label. An explicit name overrides that default.'; const nameLabel = isPatch ? 'Circuit name / patch label' : 'Circuit name override'; const circuitName = circuitNameForConnection(connection); const direction = connection.direction === 'reverse' ? 'Reverse (To → From)' : 'Forward (From → To)';
         const directionSection = directional ? `<div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Arrow direction</div><div class="v">${direction}</div></div></div><button class="button" id="toggleConnectionDirection">Switch arrow direction</button></div>` : '';
-        $('#inspectorContent').innerHTML = `<h2>${title}</h2><p class="sub">${description}</p><div class="field"><label>${nameLabel}</label><input id="connectionName" value="${esc(connection.circuitName || '')}" placeholder="Used when no equipment label is available"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Circuit name</div><div class="v">${esc(circuitName || '—')}</div></div><div class="meta-card"><div class="k">From</div><div class="v">${esc(dotKey(connection.from))}</div></div><div class="meta-card"><div class="k">To</div><div class="v">${esc(dotKey(connection.to))}</div></div></div></div>${directionSection}<div class="section"><button class="button danger" id="disconnectSelected">Disconnect</button></div>`;
+        $('#inspectorContent').innerHTML = `<h2>${title}</h2><p class="sub">${description}</p><div class="field"><label>${nameLabel}</label><input id="connectionName" value="${esc(connection.circuitName || '')}" placeholder="Optional explicit circuit name"></div><div class="section"><div class="meta-grid"><div class="meta-card"><div class="k">Circuit name</div><div class="v">${esc(circuitName || '—')}</div></div><div class="meta-card"><div class="k">From</div><div class="v">${esc(dotKey(connection.from))}</div></div><div class="meta-card"><div class="k">To</div><div class="v">${esc(dotKey(connection.to))}</div></div></div></div>${directionSection}<div class="section"><button class="button danger" id="disconnectSelected">Disconnect</button></div>`;
         $('#connectionName').addEventListener('input', (e) => { connection.circuitName = e.target.value; autosave(); renderConnections(); });
         if (directional) $('#toggleConnectionDirection').addEventListener('click', toggleConnectionDirection);
         $('#disconnectSelected').addEventListener('click', disconnectSelected);
