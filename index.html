@@ -130,6 +130,7 @@
     .strand-dot.selected { stroke: var(--accent); stroke-width: 2.4; filter: drop-shadow(0 0 7px rgba(163,230,53,.78)); }
     .strand-dot.hot { stroke: var(--accent-2); stroke-width: 2.5; filter: drop-shadow(0 0 8px rgba(36,183,255,.9)); }
     .fan-line { fill: none; stroke-width: 1.25; stroke-opacity: .62; }
+    .fan-line.selected { stroke-width: 2.8; stroke-opacity: 1; filter: drop-shadow(0 0 4px rgba(163,230,53,.72)); }
     .connection-line { fill: none; stroke: #84a2b5; stroke-width: 1.5; stroke-opacity: .72; pointer-events: stroke; cursor: pointer; }
     .connection-line.patch { stroke: var(--orange); stroke-dasharray: 8 4; stroke-opacity: .9; }
     .connection-line.selected { stroke: var(--accent); stroke-width: 2.5; stroke-opacity: 1; filter: drop-shadow(0 0 5px rgba(163,230,53,.7)); }
@@ -894,7 +895,7 @@
               const strandPath = `M ${startX} ${pillCY} C ${cp} ${pillCY}, ${cp} ${dotY}, ${dotX} ${dotY}`;
               const strandAreaHit = svgEl('rect', { x: Math.min(startX, dotX) - 24, y: dotY - 10, width: Math.abs(dotX - startX) + 48, height: 20, class: 'strand-area-hit', fill: '#ffffff', opacity: 0, 'pointer-events': 'all', cursor: 'pointer' });
               const strandHit = svgEl('path', { d: strandPath, class: 'strand-line-hit', fill: 'none', stroke: '#ffffff', opacity: 0, 'stroke-width': 18, 'pointer-events': 'all', cursor: 'pointer' });
-              const line = svgEl('path', { d: strandPath, class: 'fan-line', stroke: strand.color.hex, 'pointer-events': 'none' });
+              const line = svgEl('path', { d: strandPath, class: `fan-line${selectedDot ? ' selected' : ''}`, stroke: strand.color.hex, 'pointer-events': 'none' });
               const labelX2 = isLeft ? dotX - 10 : dotX + 10; const label2 = svgEl('text', { x: labelX2, y: dotY + 3, class: 'strand-label', 'text-anchor': isLeft ? 'end' : 'start' }); label2.textContent = strand.label;
               if (hideClosetStrand) { line.setAttribute('display', 'none'); label2.setAttribute('display', 'none'); }
               const ref = { cableId: cable.id, side, tubeIdx, strandIdx };
@@ -1001,9 +1002,10 @@
       function startStrandDrag(event, ref) {
         if (event.button !== 0 || (tool !== 'select' && tool !== 'patch')) return;
         if (tool === 'patch' && !ref.equipmentId) { showToast('Start a patch cable from an End Point or Equipment port.', 'error'); return; }
+        event.stopPropagation();
         if (additiveSelection(event)) { strandDrag = null; return; }
+        event.preventDefault();
         if (connectorAtCapacity(ref)) { showToast(`This connector already has its maximum of ${maxConnectionsForConnector(ref)} link${maxConnectionsForConnector(ref) === 1 ? '' : 's'}.`, 'error'); return; }
-        event.stopPropagation(); event.preventDefault();
         const sources = dotIsSelected(ref) && selectedDots.length > 1 ? selectedDots.map((item) => ({ ...item })) : [{ ...ref }];
         if (sources.length === 1) setDotSelection(ref, false);
         else { selected = { type: 'dot', id: dotKey(ref), ref: { ...ref } }; render(); }
@@ -1106,8 +1108,34 @@
         $('#deleteSelected').addEventListener('click', deleteSelected);
       }
 
+      function populateEquipmentPortLabels(equipment) {
+        if (!equipment) return;
+        const text = $('#equipmentPortLabelText')?.value.trim() || '';
+        if (!text) { showToast('Enter text to populate the port labels.', 'error'); return; }
+        recordHistory();
+        const labelFor = (index, offset = 0) => `P-${index + offset + 1} ${text}`;
+        if (equipment.side === 'both') {
+          ensureEquipmentLabelSets(equipment);
+          equipment.leftPortLabels = Array.from({ length: equipment.ports }, (_, index) => labelFor(index));
+          equipment.rightPortLabels = Array.from({ length: equipment.ports }, (_, index) => labelFor(index, equipment.ports));
+          equipment.portLabels = [...equipment.leftPortLabels];
+        } else equipment.portLabels = Array.from({ length: equipment.ports }, (_, index) => labelFor(index));
+        autosave(); render(); showToast(`${equipment.side === 'both' ? equipment.ports * 2 : equipment.ports} port labels populated.`);
+      }
       function renderEquipmentInspector(equipment) {
-        if (!equipment) return; ensureEquipmentLabelSets(equipment); const itemType = equipment.kind === 'equipment' ? 'Equipment' : 'End Point'; const makePortRows = (side) => Array.from({ length: equipment.ports }, (_, i) => `<div class="port-label-row"><span>${String(i + 1).padStart(2, '0')}</span><input data-port-side="${side}" data-port-index="${i}" value="${esc(equipmentPortLabels(equipment, side)?.[i] || `P-${i + 1}`)}"></div>`).join(''); const portRows = equipment.side === 'both' ? `<h3>Left-side labels</h3>${makePortRows('left')}<h3>Right-side labels</h3>${makePortRows('right')}` : makePortRows(equipment.side); $('#inspectorContent').innerHTML = `<h2>${itemType}</h2><p class="sub">${itemType} provides terminal ports for splicing and patch cables. Ports are counted per side; Both exposes twice the total. Port labels determine circuit names; labels on both sides are kept separately.</p><div class="field"><label>${itemType} name</label><input id="equipmentName" value="${esc(equipment.name)}"></div><div class="field"><label>Building / location</label><input id="equipmentBuilding" value="${esc(equipment.building)}"></div><div class="field-row"><div class="field"><label>Ports per side</label><input id="equipmentPorts" type="number" min="1" max="64" value="${equipment.ports}"></div><div class="field"><label>Port side</label><select id="equipmentSide"><option value="left" ${equipment.side === 'left' ? 'selected' : ''}>Left</option><option value="right" ${equipment.side === 'right' ? 'selected' : ''}>Right</option><option value="both" ${equipment.side === 'both' ? 'selected' : ''}>Both</option></select></div></div><div class="section"><h3>${equipment.side === 'both' ? 'Port labels by side' : 'Port labels'}</h3><div class="port-label-list">${portRows}</div></div><div class="section"><button class="button danger" id="deleteSelected">Delete ${itemType}</button></div>`; $('#equipmentName').addEventListener('input', (e) => updateItem('equipment', equipment.id, 'name', e.target.value)); $('#equipmentBuilding').addEventListener('input', (e) => updateItem('equipment', equipment.id, 'building', e.target.value)); $('#equipmentPorts').addEventListener('change', (e) => updateItem('equipment', equipment.id, 'ports', e.target.value)); $('#equipmentSide').addEventListener('change', (e) => updateItem('equipment', equipment.id, 'side', e.target.value)); document.querySelectorAll('[data-port-index]').forEach((input) => input.addEventListener('input', (e) => { const side = e.target.dataset.portSide || equipment.side; const labels = equipmentPortLabels(equipment, side); labels[Number(e.target.dataset.portIndex)] = e.target.value; autosave(); renderItems(); renderConnections(); })); $('#deleteSelected').addEventListener('click', deleteSelected);
+        if (!equipment) return;
+        ensureEquipmentLabelSets(equipment);
+        const itemType = equipment.kind === 'equipment' ? 'Equipment' : 'End Point';
+        const makePortRows = (side) => Array.from({ length: equipment.ports }, (_, i) => `<div class="port-label-row"><span>${String(i + 1).padStart(2, '0')}</span><input data-port-side="${side}" data-port-index="${i}" value="${esc(equipmentPortLabels(equipment, side)?.[i] || `P-${i + 1}`)}"></div>`).join('');
+        const portRows = equipment.side === 'both' ? `<h3>Left-side labels</h3>${makePortRows('left')}<h3>Right-side labels</h3>${makePortRows('right')}` : makePortRows(equipment.side);
+        $('#inspectorContent').innerHTML = `<h2>${itemType}</h2><p class="sub">${itemType} provides terminal ports for splicing and patch cables. Ports are counted per side; Both exposes twice the total. Port labels determine circuit names; labels on both sides are kept separately.</p><div class="field"><label>${itemType} name</label><input id="equipmentName" value="${esc(equipment.name)}"></div><div class="field"><label>Building / location</label><input id="equipmentBuilding" value="${esc(equipment.building)}"></div><div class="section"><h3>Auto-fill port labels</h3><p class="sub">Enter text such as <code>Switch 1</code> to create unique labels for every available port.</p><div class="field"><label>Text to add</label><input id="equipmentPortLabelText" placeholder="Switch 1"></div><button class="button" id="populateEquipmentPortLabels">Populate all port labels</button></div><div class="field-row"><div class="field"><label>Ports per side</label><input id="equipmentPorts" type="number" min="1" max="64" value="${equipment.ports}"></div><div class="field"><label>Port side</label><select id="equipmentSide"><option value="left" ${equipment.side === 'left' ? 'selected' : ''}>Left</option><option value="right" ${equipment.side === 'right' ? 'selected' : ''}>Right</option><option value="both" ${equipment.side === 'both' ? 'selected' : ''}>Both</option></select></div></div><div class="section"><h3>${equipment.side === 'both' ? 'Port labels by side' : 'Port labels'}</h3><div class="port-label-list">${portRows}</div></div><div class="section"><button class="button danger" id="deleteSelected">Delete ${itemType}</button></div>`;
+        $('#equipmentName').addEventListener('input', (e) => updateItem('equipment', equipment.id, 'name', e.target.value));
+        $('#equipmentBuilding').addEventListener('input', (e) => updateItem('equipment', equipment.id, 'building', e.target.value));
+        $('#populateEquipmentPortLabels').addEventListener('click', () => populateEquipmentPortLabels(equipment));
+        $('#equipmentPorts').addEventListener('change', (e) => updateItem('equipment', equipment.id, 'ports', e.target.value));
+        $('#equipmentSide').addEventListener('change', (e) => updateItem('equipment', equipment.id, 'side', e.target.value));
+        document.querySelectorAll('[data-port-index]').forEach((input) => input.addEventListener('input', (e) => { const side = e.target.dataset.portSide || equipment.side; const labels = equipmentPortLabels(equipment, side); labels[Number(e.target.dataset.portIndex)] = e.target.value; autosave(); renderItems(); renderConnections(); }));
+        $('#deleteSelected').addEventListener('click', deleteSelected);
       }
 
       function renderWorkzoneInspector(zone) {
@@ -1133,7 +1161,7 @@
         $('#disconnectSelected').addEventListener('click', disconnectSelected);
       }
 
-      function disconnectSelected() { if (selected?.type === 'connection') { const before = state.connections.length; const next = state.connections.filter((c) => c.id !== selected.id); if (next.length === before) { showToast('Connection no longer exists.', 'error'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast('Connection disconnected.'); return; } if (!selected?.ref) return; const refs = selectedDots.length ? selectedDots : [selected.ref]; const before = state.connections.length; const next = state.connections.filter((c) => !refs.some((ref) => refsEqual(c.from, ref) || refsEqual(c.to, ref))); if (next.length === before) { showToast('Selected strand(s) are not connected.'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast(refs.length > 1 ? `${refs.length} connections disconnected.` : 'Connection disconnected.'); }
+      function disconnectSelected() { if (selected?.type === 'connection') { const before = state.connections.length; const next = state.connections.filter((c) => c.id !== selected.id); if (next.length === before) { showToast('Connection no longer exists.', 'error'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast('Connection disconnected.'); return; } if (!selected?.ref) return; const refs = selectedDots.length ? selectedDots : [selected.ref]; const before = state.connections.length; const next = state.connections.filter((c) => !refs.some((ref) => refsEqual(c.from, ref) || refsEqual(c.to, ref))); const removed = before - next.length; if (!removed) { showToast('Selected strand(s) are not connected.'); return; } recordHistory(); state.connections = next; selected = null; clearDotSelection(); autosave(); render(); showToast(removed > 1 ? `${removed} connections disconnected.` : 'Connection disconnected.'); }
       function deleteSelected() { if (!selected) return; recordHistory(); if (selected.type === 'cable') { state.connections = state.connections.filter((c) => c.from.cableId !== selected.id && c.to.cableId !== selected.id); state.cables = state.cables.filter((c) => c.id !== selected.id); } else if (selected.type === 'equipment') { state.connections = state.connections.filter((c) => c.from.equipmentId !== selected.id && c.to.equipmentId !== selected.id); state.equipment = state.equipment.filter((e) => e.id !== selected.id); } else if (selected.type === 'vertex') { state.connections = state.connections.filter((c) => c.from.vertexId !== selected.id && c.to.vertexId !== selected.id); state.vertices = state.vertices.filter((vertex) => vertex.id !== selected.id); } else if (selected.type === 'workzone') state.workZones = state.workZones.filter((z) => z.id !== selected.id); else if (selected.type === 'legend') state.legends = state.legends.filter((legend) => legend.id !== selected.id); else if (selected.type === 'connection') state.connections = state.connections.filter((c) => c.id !== selected.id); else if (selected.type === 'dot') { disconnectSelected(); return; } selected = null; clearDotSelection(); autosave(); render(); }
 
       function fitView() { const bounds = getBounds(); if (!bounds) { state.viewport = { x: 0, y: 0, zoom: 1 }; updateTransform(); return; } const r = canvas.getBoundingClientRect(); const width = Math.max(500, bounds.maxX - bounds.minX + 180); const height = Math.max(350, bounds.maxY - bounds.minY + 180); state.viewport.zoom = clamp(Math.min(r.width / width, r.height / height), .12, 1.4); state.viewport.x = -((bounds.minX + bounds.maxX) / 2) * state.viewport.zoom; state.viewport.y = -((bounds.minY + bounds.maxY) / 2) * state.viewport.zoom; autosave(); updateTransform(); }
