@@ -609,7 +609,7 @@
 
       function inventoryEndpointGroupKey(ref) {
         if (ref?.cableId) return `cable:${ref.cableId}:${ref.side}:${ref.tubeIdx}`;
-        if (ref?.equipmentId) return `equipment:${ref.equipmentId}:${ref.side || 'right'}`;
+        if (ref?.equipmentId) return `equipment:${ref.equipmentId}:${ref.side || 'right'}:${num(ref.strandIdx)}`;
         if (ref?.vertexId) return `vertex:${ref.vertexId}:${ref.port || 'right'}`;
         return '';
       }
@@ -637,17 +637,17 @@
           if (ref?.equipmentId) {
             const equipment = equipmentById(ref.equipmentId);
             if (!equipment) return null;
-            return { type: equipment.kind === 'equipment' ? 'Equipment' : 'End Point', name: equipment.name, location: equipment.building, port: equipmentPortLabel(equipment, ref.side, ref.strandIdx), cableSegment: '', tube: '', tubeNumber: '', fibers: '', colors: '', ref };
+            return { type: equipment.kind === 'equipment' ? 'Equipment' : 'End Point', name: equipment.name, location: equipment.building, port: equipmentPortLabel(equipment, ref.side, ref.strandIdx), portNumber: String(num(ref.strandIdx) + 1), cableSegment: '', tube: '', tubeNumber: '', fibers: '', colors: '', ref };
           }
           if (ref?.cableId) {
             const cable = cableById(ref.cableId);
             if (!cable) return null;
             const tube = tubeInfo(cable, ref.tubeIdx); const strand = strandInfo(cable, ref.tubeIdx, ref.strandIdx);
-            return { type: 'Cable', name: cable.cableName || 'CABLE', location: cable.name || '', port: '', cableSegment: `${cable.cableName || 'CABLE'} - ${cable.cableSegment || '1'}`, tube: `Tube ${String(num(ref.tubeIdx) + 1).padStart(2, '0')}`, tubeNumber: String(num(ref.tubeIdx) + 1), tubeLabel: tube.label, fibers: strand.label, colors: strand.color.abb, ref };
+            return { type: 'Cable', name: cable.cableName || 'CABLE', location: cable.name || '', port: '', portNumber: '', cableSegment: `${cable.cableName || 'CABLE'} - ${cable.cableSegment || '1'}`, tube: tube.label, tubeNumber: String(num(ref.tubeIdx) + 1), tubeLabel: tube.label, fibers: strand.label, colors: strand.color.abb, ref };
           }
           if (ref?.vertexId) {
             const vertex = vertexById(ref.vertexId);
-            return vertex ? { type: 'Vertex', name: vertex.label || '90° routing vertex', location: '', port: ref.port || '', cableSegment: '', tube: '', tubeNumber: '', fibers: '', colors: '', ref } : null;
+            return vertex ? { type: 'Vertex', name: vertex.label || '90° routing vertex', location: '', port: ref.port || '', portNumber: '', cableSegment: '', tube: '', tubeNumber: '', fibers: '', colors: '', ref } : null;
           }
           return null;
         }).filter(Boolean);
@@ -656,6 +656,7 @@
           name: uniqueInventoryValues(entries.map((entry) => entry.name)).join('; '),
           location: uniqueInventoryValues(entries.map((entry) => entry.location)).join('; '),
           port: uniqueInventoryValues(entries.map((entry) => entry.port)).join('; '),
+          portNumber: uniqueInventoryValues(entries.map((entry) => entry.portNumber)).join('; '),
           cableSegment: uniqueInventoryValues(entries.map((entry) => entry.cableSegment)).join('; '),
           tube: uniqueInventoryValues(entries.map((entry) => entry.tube)).join('; '),
           tubeNumber: uniqueInventoryValues(entries.map((entry) => entry.tubeNumber)).join('; '),
@@ -668,8 +669,8 @@
       function inventoryConnectionDescription(type, from, to) {
         const fromLocation = from.location ? ` at ${from.location}` : '';
         const toLocation = to.location ? ` at ${to.location}` : '';
-        const fromPort = from.port ? ` port ${from.port}` : '';
-        const toPort = to.port ? ` port ${to.port}` : '';
+        const fromPort = from.port ? ` port ${from.portNumber ? `${from.portNumber} (${from.port})` : from.port}` : '';
+        const toPort = to.port ? ` port ${to.portNumber ? `${to.portNumber} (${to.port})` : to.port}` : '';
         const fromFibers = from.colors ? ` fibers ${from.colors}` : '';
         const toFibers = to.colors ? ` fibers ${to.colors}` : '';
         if (type === 'patch') {
@@ -709,9 +710,9 @@
       }
       function csvEscape(value) { const text = String(value ?? ''); return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text; }
       function exportCircuitCsv() {
-        const headers = ['Project', 'Circuit Name', 'Sequence', 'Record Type', 'Connection Type', 'From Type', 'From Name', 'From Location', 'From Port', 'From Cable Segment', 'From Tube', 'From Fiber(s)', 'To Type', 'To Name', 'To Location', 'To Port', 'To Cable Segment', 'To Tube', 'To Fiber(s)', 'Fiber Count', 'Description'];
+        const headers = ['Project', 'Circuit Name', 'Sequence', 'Record Type', 'Connection Type', 'From Type', 'From Name', 'From Location', 'From Port #', 'From Port', 'From Cable Segment', 'From Tube', 'From Fiber(s)', 'To Type', 'To Name', 'To Location', 'To Port #', 'To Port', 'To Cable Segment', 'To Tube', 'To Fiber(s)', 'Fiber Count', 'Description'];
         const rows = buildCircuitInventoryRows();
-        const values = rows.map((row) => [state.projectName || 'Untitled Project', row.circuitName, row.sequence, row.recordType, row.type === 'patch' ? 'Patch cable' : 'Fiber splice', row.from.type, row.from.name, row.from.location, row.from.port, row.from.cableSegment, row.from.tube, row.from.fibers, row.to.type, row.to.name, row.to.location, row.to.port, row.to.cableSegment, row.to.tube, row.to.fibers, row.fiberCount, row.recordType === 'START' ? `Starts - ${row.description}` : row.description]);
+        const values = rows.map((row) => [state.projectName || 'Untitled Project', row.circuitName, row.sequence, row.recordType, row.type === 'patch' ? 'Patch cable' : 'Fiber splice', row.from.type, row.from.name, row.from.location, row.from.portNumber, row.from.port, row.from.cableSegment, row.from.tube, row.from.fibers, row.to.type, row.to.name, row.to.location, row.to.portNumber, row.to.port, row.to.cableSegment, row.to.tube, row.to.fibers, row.fiberCount, row.recordType === 'START' ? `Starts - ${row.description}` : row.description]);
         const csv = `\uFEFF${[headers, ...values].map((row) => row.map(csvEscape).join(',')).join('\r\n')}\r\n`;
         const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' }); const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = `${(state.projectName || 'fiber-splice-project').replace(/[^a-z0-9_-]+/gi, '_')}-circuit-inventory.csv`; link.click(); setTimeout(() => URL.revokeObjectURL(url), 0); saveStateLabel('Circuit inventory CSV exported'); showToast(`${rows.length} circuit inventory row${rows.length === 1 ? '' : 's'} exported.`);
       }
