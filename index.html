@@ -682,20 +682,15 @@
       }
       function buildCircuitInventoryRows() {
         const graph = buildCircuitGraph();
-        const groups = new Map();
-        state.connections.forEach((connection) => {
+        const rows = state.connections.map((connection) => {
           const circuitName = circuitNameForConnection(connection, graph) || connection.circuitName || 'Unassigned circuit';
           const refs = [connection.from, connection.to].sort(inventoryRefSort);
-          const key = [circuitName, connection.type || 'splice', inventoryEndpointGroupKey(refs[0]), inventoryEndpointGroupKey(refs[1])].join('|');
-          if (!groups.has(key)) groups.set(key, { circuitName, type: connection.type === 'patch' ? 'patch' : 'splice', refs: [[], []], connections: [] });
-          const group = groups.get(key); group.refs[0].push(refs[0]); group.refs[1].push(refs[1]); group.connections.push(connection);
+          const from = inventorySide([refs[0]]); const to = inventorySide([refs[1]]);
+          const positions = refs.map((ref) => inventoryEndpointPosition(ref).x);
+          const type = connection.type === 'patch' ? 'patch' : 'splice';
+          return { connectionId: connection.id, circuitName, type, from, to, fiberCount: 1, description: inventoryConnectionDescription(type, from, to), position: positions.length ? Math.min(...positions) : 0 };
         });
-        const rows = [...groups.values()].map((group) => {
-          const from = inventorySide(group.refs[0]); const to = inventorySide(group.refs[1]);
-          const positions = group.refs.flat().map((ref) => inventoryEndpointPosition(ref).x);
-          return { circuitName: group.circuitName, type: group.type, from, to, fiberCount: group.connections.length, description: inventoryConnectionDescription(group.type, from, to), position: positions.length ? Math.min(...positions) : 0 };
-        });
-        rows.sort((a, b) => a.circuitName.localeCompare(b.circuitName) || a.position - b.position || a.description.localeCompare(b.description));
+        rows.sort((a, b) => a.circuitName.localeCompare(b.circuitName) || a.position - b.position || a.description.localeCompare(b.description) || String(a.connectionId).localeCompare(String(b.connectionId)));
         const byCircuit = new Map(); rows.forEach((row) => { if (!byCircuit.has(row.circuitName)) byCircuit.set(row.circuitName, []); byCircuit.get(row.circuitName).push(row); });
         const ordered = [];
         byCircuit.forEach((circuitRows) => {
