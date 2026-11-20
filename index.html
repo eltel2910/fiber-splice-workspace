@@ -405,6 +405,7 @@
       function refsEqual(a, b) { return !!a && !!b && dotKey(a) === dotKey(b); }
       function dotIsSelected(ref) { return selectedDots.some((item) => refsEqual(item, ref)); }
       function clearDotSelection() { selectedDots = []; }
+      function additiveSelection(event) { return !!(event?.shiftKey || event?.ctrlKey || event?.metaKey); }
       function setDotSelection(ref, additive = false) {
         if (additive) {
           const index = selectedDots.findIndex((item) => refsEqual(item, ref));
@@ -899,10 +900,8 @@
               const ref = { cableId: cable.id, side, tubeIdx, strandIdx };
               const dot = svgEl('circle', { cx: dotX, cy: dotY, r: L.STRAND_R, class: `strand-dot${selectedDot ? ' selected' : ''}${hot ? ' hot' : ''}`, fill: strand.color.hex, 'data-dot-key': dotKey(ref), 'pointer-events': 'all' });
               const hit = svgEl('circle', { cx: dotX, cy: dotY, r: 18, class: 'strand-hit', fill: '#ffffff', opacity: '0', 'pointer-events': 'all' });
-              const selectDot = (event) => { event.stopPropagation(); setDotSelection(ref, event.shiftKey); };
-              strandAreaHit.addEventListener('pointerdown', selectDot);
+              const selectDot = (event) => { event.stopPropagation(); setDotSelection(ref, additiveSelection(event)); };
               strandAreaHit.addEventListener('click', selectDot);
-              strandHit.addEventListener('pointerdown', selectDot);
               strandHit.addEventListener('click', selectDot);
               dot.addEventListener('pointerdown', (event) => startStrandDrag(event, ref));
               dot.addEventListener('click', selectDot);
@@ -926,7 +925,7 @@
           const offset = vertexPortOffset(vertex, port); const ref = { vertexId: vertex.id, port }; const connected = connectorConnectionCount(ref) > 0; const hot = hoverDot && refsEqual(hoverDot, ref);
           const circle = svgEl('circle', { cx: offset.x, cy: offset.y, r: connected ? 5 : 4, class: `route-vertex-port${hot ? ' hot' : ''}`, fill: connectorColor(ref), 'pointer-events': 'none' });
           const hit = svgEl('circle', { cx: offset.x, cy: offset.y, r: 13, class: 'vertex-port-hit' });
-          hit.addEventListener('pointerdown', (event) => startStrandDrag(event, ref)); hit.addEventListener('pointerenter', () => { hoverDot = ref; renderItems(); }); hit.addEventListener('pointerleave', () => { hoverDot = null; renderItems(); }); hit.addEventListener('click', (event) => { event.stopPropagation(); setDotSelection(ref, event.shiftKey); });
+          hit.addEventListener('pointerdown', (event) => startStrandDrag(event, ref)); hit.addEventListener('pointerenter', () => { hoverDot = ref; renderItems(); }); hit.addEventListener('pointerleave', () => { hoverDot = null; renderItems(); }); hit.addEventListener('click', (event) => { event.stopPropagation(); setDotSelection(ref, additiveSelection(event)); });
           group.append(circle, hit);
         });
         parent.append(group);
@@ -945,7 +944,7 @@
         const sides = equipment.side === 'both' ? ['left', 'right'] : [equipment.side === 'left' ? 'left' : 'right'];
         sides.forEach((side) => {
           for (let index = 0; index < equipment.ports; index += 1) {
-            const y = equipmentPortY(equipment, side, index) - equipment.y; const portX = side === 'left' ? -13 : width + 13; const labelX = side === 'left' ? 12 : width - 12; const anchor = side === 'left' ? 'start' : 'end'; const label = svgEl('text', { x: labelX, y: y + 3, class: 'port-label', 'text-anchor': anchor }); label.textContent = equipmentPortLabel(equipment, side, index); const ref = { equipmentId: equipment.id, side, tubeIdx: 0, strandIdx: index }; const circle = svgEl('circle', { cx: portX, cy: y, r: 5.3, class: `node-port${dotIsSelected(ref) ? ' selected' : ''}${hoverDot && refsEqual(hoverDot, ref) ? ' hot' : ''}` }); circle.setAttribute('style', `fill:${connectorColor(ref)}`); const hit = svgEl('circle', { cx: portX, cy: y, r: 20, class: 'equipment-port-hit', fill: 'transparent' }); hit.addEventListener('pointerdown', (event) => startStrandDrag(event, ref)); hit.addEventListener('pointerenter', () => { hoverDot = ref; renderItems(); }); hit.addEventListener('pointerleave', () => { hoverDot = null; renderItems(); }); hit.addEventListener('click', (event) => { event.stopPropagation(); setDotSelection(ref, event.shiftKey); }); group.append(label, circle, hit);
+            const y = equipmentPortY(equipment, side, index) - equipment.y; const portX = side === 'left' ? -13 : width + 13; const labelX = side === 'left' ? 12 : width - 12; const anchor = side === 'left' ? 'start' : 'end'; const label = svgEl('text', { x: labelX, y: y + 3, class: 'port-label', 'text-anchor': anchor }); label.textContent = equipmentPortLabel(equipment, side, index); const ref = { equipmentId: equipment.id, side, tubeIdx: 0, strandIdx: index }; const circle = svgEl('circle', { cx: portX, cy: y, r: 5.3, class: `node-port${dotIsSelected(ref) ? ' selected' : ''}${hoverDot && refsEqual(hoverDot, ref) ? ' hot' : ''}` }); circle.setAttribute('style', `fill:${connectorColor(ref)}`); const hit = svgEl('circle', { cx: portX, cy: y, r: 20, class: 'equipment-port-hit', fill: 'transparent' }); hit.addEventListener('pointerdown', (event) => startStrandDrag(event, ref)); hit.addEventListener('pointerenter', () => { hoverDot = ref; renderItems(); }); hit.addEventListener('pointerleave', () => { hoverDot = null; renderItems(); }); hit.addEventListener('click', (event) => { event.stopPropagation(); setDotSelection(ref, additiveSelection(event)); }); group.append(label, circle, hit);
           }
         });
         parent.append(group);
@@ -1004,7 +1003,7 @@
         if (tool === 'patch' && !ref.equipmentId) { showToast('Start a patch cable from an End Point or Equipment port.', 'error'); return; }
         if (connectorAtCapacity(ref)) { showToast(`This connector already has its maximum of ${maxConnectionsForConnector(ref)} link${maxConnectionsForConnector(ref) === 1 ? '' : 's'}.`, 'error'); return; }
         event.stopPropagation(); event.preventDefault();
-        if (event.shiftKey) { setDotSelection(ref, true); strandDrag = null; return; }
+        if (additiveSelection(event)) { strandDrag = null; return; }
         const sources = dotIsSelected(ref) && selectedDots.length > 1 ? selectedDots.map((item) => ({ ...item })) : [{ ...ref }];
         if (sources.length === 1) setDotSelection(ref, false);
         else { selected = { type: 'dot', id: dotKey(ref), ref: { ...ref } }; render(); }
@@ -1040,6 +1039,15 @@
       function updateItem(type, idValue, field, value) { const item = type === 'cable' ? cableById(idValue) : type === 'equipment' ? equipmentById(idValue) : type === 'vertex' ? vertexById(idValue) : type === 'workzone' ? workzoneById(idValue) : legendById(idValue); if (!item) return; recordHistory(); if (field === 'fiberCount') item.fiberCount = clamp(Math.round(num(value, 12)), 1, 5000); else if (field === 'ports') { item.ports = clamp(Math.round(num(value, 8)), 1, 64); item.portLabels = (item.portLabels || []).slice(0, item.ports); if (type === 'equipment' && item.side === 'both') { ensureEquipmentLabelSets(item); item.leftPortLabels = item.leftPortLabels.slice(0, item.ports); item.rightPortLabels = item.rightPortLabels.slice(0, item.ports); } } else if (field === 'side' && type === 'equipment') { const previousSide = item.side; ensureEquipmentLabelSets(item); if (value === 'both') { item.side = 'both'; ensureEquipmentLabelSets(item); } else { if (previousSide === 'both') item.portLabels = [...equipmentPortLabels(item, value)]; item.side = value; } } else if (field === 'width' || field === 'height') item[field] = type === 'legend' ? clamp(Math.round(num(value, field === 'width' ? 230 : 300)), field === 'width' ? 180 : 180, field === 'width' ? 900 : 1200) : clamp(Math.round(num(value, 100)), 60, 2000); else if (field === 'size' && type === 'vertex') item.size = clamp(Math.round(num(value, VERTEX_SIZE)), 14, 80); else if (field === 'portCount' && type === 'vertex') item.portCount = clamp(Math.round(num(value, 4)), 2, VERTEX_PORTS.length); else if (field === 'fibersPerPort' && type === 'vertex') item.fibersPerPort = clamp(Math.round(num(value, MAX_VERTEX_PORT_CONNECTIONS)), 1, 144); else item[field] = value; autosave(); if (type === 'legend') render(); else if (field === 'fiberCount' || field === 'ports' || field === 'side' || field === 'isCollapsed' || (type === 'vertex' && ['size', 'portCount', 'fibersPerPort'].includes(field))) render(); else { renderItems(); renderWorkzones(); renderConnections(); }
       }
 
+      function connectionsForRefs(refs) {
+        return state.connections.filter((connection) => refs.some((ref) => refsEqual(connection.from, ref) || refsEqual(connection.to, ref)));
+      }
+      function applyBulkCircuitName() {
+        const refs = selectedDots.length ? selectedDots : (selected?.ref ? [selected.ref] : []);
+        const connections = connectionsForRefs(refs); if (!connections.length) { showToast('No connected strands selected.', 'error'); return; }
+        const value = $('#bulkCircuitName')?.value.trim() || '';
+        recordHistory(); connections.forEach((connection) => { connection.circuitName = value; }); autosave(); render(); showToast(`${connections.length} selected connection${connections.length === 1 ? '' : 's'} updated.`);
+      }
       function renderInspector() {
         const content = $('#inspectorContent');
         if (!selected || (selected.type === 'dot' && !selected.ref)) { content.innerHTML = `<h2>Workspace</h2><p class="sub">A local-first fiber splice diagram editor based on the supplied workspace concept.</p><div class="notice">Place a cable, end point, or Vertex from the toolbar. A Vertex provides configurable bundle ports for clean 90-degree cable routing.</div><div class="section"><h3>Browser storage</h3><div class="meta-grid"><div class="meta-card"><div class="k">Project</div><div class="v">${esc(state.projectName)}</div></div><div class="meta-card"><div class="k">Items</div><div class="v">${state.cables.length + state.equipment.length + state.vertices.length + state.workZones.length}</div></div></div><div class="button-row" style="margin-top:10px"><button class="button" id="saveNowBtn">Save locally</button><button class="button" id="showProjectsBtn">Project list</button></div></div><div class="section"><h3>Current tool</h3><p class="sub">${tool === 'cable' ? 'Click the canvas to place a cable.' : tool === 'equipment' ? 'Click the canvas to place an end point.' : tool === 'vertex' ? 'Click the canvas to place a 90-degree routing vertex.' : tool === 'workzone' ? 'Click the canvas to place a work zone.' : 'Select and drag items. Use middle/right drag to pan.'}</p></div>`; $('#saveNowBtn')?.addEventListener('click', () => { autosave(); showToast('Saved to this browser.'); }); $('#showProjectsBtn')?.addEventListener('click', openProjects); return; }
